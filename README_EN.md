@@ -52,6 +52,11 @@ StoryForge AI is an AI-assisted creation environment designed for novelists and 
 - Adjustable temperature, Top-P, max token count, and other parameters
 - Light/Dark theme switching
 
+### 🏷️ Project Type Management
+- Support for Novel and TRPG project types
+- Header breadcrumb displays current project type in real-time
+- Freely switch project type in settings
+
 ### 📦 Data Export/Import
 - One-click export of complete project data to JSON file
 - Support for importing project data from JSON files
@@ -498,6 +503,12 @@ Contributions are welcome! Please follow these steps:
 ---
 
 ## 📝 Changelog
+
+### v0.2.0 (2026-06-01)
+
+- ✨ Header breadcrumb displays project type badge (Novel/TRPG)
+- ✨ Support switching project type in settings page
+- ✨ Header type badge refreshes immediately after type change
 
 ### v0.1.0 (2025-06-01)
 

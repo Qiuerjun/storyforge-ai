@@ -5,8 +5,9 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
-import { Save, Trash2, Sparkles, Download } from "lucide-react";
+import { Save, Trash2, Sparkles, Swords, Download } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { useAppStore } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,6 +25,7 @@ import { AIGenerateDialog } from "@/components/ai-generate-dialog";
 export default function ProjectSettingsPage() {
   const params = useParams();
   const projectId = params.projectId as string;
+  const { setCurrentProjectType } = useAppStore();
 
   const [project, setProject] = useState({
     name: "",
@@ -122,6 +124,8 @@ export default function ProjectSettingsPage() {
       });
       const data = await res.json();
       if (data.success) {
+        // 更新 store 中的项目类型，使 Header 标签立即刷新
+        setCurrentProjectType(project.type);
         toast({ title: "保存成功", variant: "success" });
       }
     } catch (err) {
@@ -183,6 +187,39 @@ export default function ProjectSettingsPage() {
                 setProject((p) => ({ ...p, name: e.target.value }))
               }
             />
+          </div>
+          <div className="space-y-2">
+            <Label>项目类型</Label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() =>
+                  setProject((p) => ({ ...p, type: "novel" }))
+                }
+                className={`flex flex-col items-center gap-2 rounded-lg border-2 p-4 transition-smooth ${
+                  project.type === "novel"
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-primary/50"
+                }`}
+              >
+                <Sparkles className="h-6 w-6 text-blue-500" />
+                <span className="text-sm font-medium">小说创作</span>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setProject((p) => ({ ...p, type: "trpg" }))
+                }
+                className={`flex flex-col items-center gap-2 rounded-lg border-2 p-4 transition-smooth ${
+                  project.type === "trpg"
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-primary/50"
+                }`}
+              >
+                <Swords className="h-6 w-6 text-orange-500" />
+                <span className="text-sm font-medium">跑团 (TRPG)</span>
+              </button>
+            </div>
           </div>
           <div className="space-y-2">
             <Label htmlFor="projDesc">项目描述</Label>
