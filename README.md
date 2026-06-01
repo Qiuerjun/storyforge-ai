@@ -83,15 +83,7 @@ StoryForge AI 是一个专为小说家和跑团（TRPG）玩家打造的 AI 辅�
 - npm 9 或更高版本
 - （可选）Ollama - 用于本地模型运行
 
-### 方式一：一键启动（推荐）
-
-双击运行 `start.bat`，脚本会自动完成以下操作：
-- 检查 Node.js 环境
-- 安装项目依赖（首次运行）
-- 初始化数据库（首次运行）
-- 启动开发服务器并打开浏览器
-
-### 方式二：手动启动
+### 快速启动
 
 #### 1. 克隆项目
 
@@ -182,7 +174,6 @@ storyforge-ai/
 ├── prisma/                       # 数据库
 │   └── schema.prisma             # 数据模型
 ├── public/                       # 静态资源
-├── start.bat                     # 快捷启动脚本（Windows）
 └── package.json                  # 项目配置
 ```
 
@@ -238,7 +229,6 @@ storyforge-ai/
 
 | 命令 | 说明 |
 |------|------|
-| `start.bat` | **一键启动**（自动安装依赖、初始化数据库、启动服务） |
 | `npm run dev` | 启动开发服务器 |
 | `npm run build` | 构建生产版本 |
 | `npm run start` | 启动生产服务器 |
