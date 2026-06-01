@@ -406,6 +406,7 @@ export default function WorkspacePage() {
                             <Streamdown
                               animated
                               isAnimating={isStreaming && msg.id === messages[messages.length - 1]?.id}
+                              caret={isStreaming && msg.id === messages[messages.length - 1]?.id ? "block" : undefined}
                             >
                               {msg.content}
                             </Streamdown>
@@ -418,11 +419,6 @@ export default function WorkspacePage() {
                         ) : (
                           msg.content
                         )}
-                        {isStreaming &&
-                          msg.id === messages[messages.length - 1]?.id &&
-                          msg.role === "assistant" && (
-                            <span className="inline-block w-2 h-4 bg-foreground animate-blink ml-0.5" />
-                          )}
                       </div>
 
                       {/* 操作按钮 */}
