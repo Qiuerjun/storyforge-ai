@@ -66,6 +66,8 @@ export default function WorkspacePage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  /** 记录当前正在流式输出的 AI 消息 ID */
+  const streamingMsgIdRef = useRef<string | null>(null);
 
   /** 滚动到底部 */
   const scrollToBottom = useCallback(() => {
@@ -113,9 +115,7 @@ export default function WorkspacePage() {
   const handleStop = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
-      abortControllerRef.current = null;
     }
-    setIsStreaming(false);
   };
 
   /** 删除消息 */
@@ -204,6 +204,7 @@ export default function WorkspacePage() {
 
     // 创建 AI 回复占位
     const aiMsgId = `ai-${Date.now()}`;
+    streamingMsgIdRef.current = aiMsgId;
     const aiMsg: Message = {
       id: aiMsgId,
       role: "assistant",
@@ -243,38 +244,59 @@ export default function WorkspacePage() {
       const decoder = new TextDecoder();
       let fullContent = "";
 
+      // 光标字符，拼在内容末尾随 Streamdown 一起渲染
+      const CURSOR = "█"; // █
+
       if (reader) {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
           const chunk = decoder.decode(value, { stream: true });
-          // toTextStreamResponse 返回纯文本流，直接拼接内容
           fullContent += chunk;
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === aiMsgId ? { ...m, content: fullContent } : m
-            )
-          );
+          // 带光标一起显示（检查消息是否仍存在，防止覆盖删除操作）
+          setMessages((prev) => {
+            const exists = prev.some((m) => m.id === aiMsgId);
+            if (!exists) return prev;
+            return prev.map((m) =>
+              m.id === aiMsgId ? { ...m, content: fullContent + CURSOR } : m
+            );
+          });
         }
       }
 
-      // 保存 AI 回复到数据库
-      if (fullContent) {
+      // 保存时去掉光标字符
+      const contentToSave = fullContent || "";
+      if (contentToSave) {
         await fetch(`/api/projects/${projectId}/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ role: "assistant", content: fullContent }),
+          body: JSON.stringify({ role: "assistant", content: contentToSave }),
         });
+        // 用干净内容替换（去掉光标）
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === aiMsgId ? { ...m, content: contentToSave } : m
+          )
+        );
       }
     } catch (err: unknown) {
       if (err instanceof Error && err.name === "AbortError") {
-        const currentMsg = messages.find((m) => m.id === aiMsgId);
-        if (currentMsg?.content) {
+        // 从当前 messages 状态中获取已生成的内容（去掉光标）
+        let savedContent = "";
+        setMessages((prev) => {
+          const msg = prev.find((m) => m.id === aiMsgId);
+          savedContent = msg?.content?.replace(/█$/, "") || "";
+          // 同步去掉光标
+          return prev.map((m) =>
+            m.id === aiMsgId ? { ...m, content: savedContent } : m
+          );
+        });
+        if (savedContent) {
           await fetch(`/api/projects/${projectId}/messages`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ role: "assistant", content: currentMsg.content }),
+            body: JSON.stringify({ role: "assistant", content: savedContent }),
           });
         }
       } else {
@@ -289,6 +311,7 @@ export default function WorkspacePage() {
     } finally {
       setIsStreaming(false);
       abortControllerRef.current = null;
+      streamingMsgIdRef.current = null;
     }
   };
 
@@ -406,7 +429,6 @@ export default function WorkspacePage() {
                             <Streamdown
                               animated
                               isAnimating={isStreaming && msg.id === messages[messages.length - 1]?.id}
-                              caret={isStreaming && msg.id === messages[messages.length - 1]?.id ? "block" : undefined}
                             >
                               {msg.content}
                             </Streamdown>
