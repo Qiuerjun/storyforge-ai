@@ -151,6 +151,17 @@
   animation: blink 1s step-end infinite;
 }
 
+/* 流式输出光标 - 用 ::after 伪元素紧跟在 Streamdown 最后一个 block 后面 */
+.streaming-cursor::after {
+  content: "█";
+  display: inline-block;
+  animation: blink 1s step-end infinite;
+  vertical-align: text-bottom;
+  font-size: 0.875rem;
+  line-height: 1;
+  margin-left: 1px;
+}
+
 /* 平滑过渡 */
 @layer utilities {
   .transition-smooth {

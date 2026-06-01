@@ -68,6 +68,8 @@ export default function WorkspacePage() {
   const abortControllerRef = useRef<AbortController | null>(null);
   /** 记录当前正在流式输出的 AI 消息 ID */
   const streamingMsgIdRef = useRef<string | null>(null);
+  /** 标记是否正在删除消息（阻止 AbortError 处理器重新保存） */
+  const isDeletingRef = useRef(false);
 
   /** 滚动到底部 */
   const scrollToBottom = useCallback(() => {
@@ -121,18 +123,37 @@ export default function WorkspacePage() {
   /** 删除消息 */
   const handleDelete = async (msgId: string) => {
     if (!confirm("确定要删除这条消息吗？")) return;
+
+    // 如果正在流式输出且要删除的是当前流式消息，先标记再中止
+    if (isStreaming && streamingMsgIdRef.current === msgId) {
+      isDeletingRef.current = true;
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      // 等待流式输出完全结束
+      await new Promise<void>((resolve) => {
+        const check = () => {
+          if (!isStreaming) resolve();
+          else setTimeout(check, 50);
+        };
+        check();
+      });
+    }
+
+    // 先从 UI 移除
+    setMessages((prev) => prev.filter((m) => m.id !== msgId));
+
+    // 尝试从数据库删除（消息可能还未保存到数据库）
     try {
       const res = await fetch(`/api/projects/${projectId}/messages/${msgId}`, {
         method: "DELETE",
       });
       const data = await res.json();
       if (data.success) {
-        setMessages((prev) => prev.filter((m) => m.id !== msgId));
         toast({ title: "消息已删除" });
       }
     } catch (err) {
       console.error("删除消息失败:", err);
-      toast({ title: "删除失败", variant: "destructive" });
     }
   };
 
@@ -244,9 +265,6 @@ export default function WorkspacePage() {
       const decoder = new TextDecoder();
       let fullContent = "";
 
-      // 光标字符，拼在内容末尾随 Streamdown 一起渲染
-      const CURSOR = "█"; // █
-
       if (reader) {
         while (true) {
           const { done, value } = await reader.read();
@@ -254,50 +272,44 @@ export default function WorkspacePage() {
 
           const chunk = decoder.decode(value, { stream: true });
           fullContent += chunk;
-          // 带光标一起显示（检查消息是否仍存在，防止覆盖删除操作）
           setMessages((prev) => {
-            const exists = prev.some((m) => m.id === aiMsgId);
-            if (!exists) return prev;
+            // 检查消息是否仍存在（可能已被删除）
+            if (!prev.some((m) => m.id === aiMsgId)) return prev;
             return prev.map((m) =>
-              m.id === aiMsgId ? { ...m, content: fullContent + CURSOR } : m
+              m.id === aiMsgId ? { ...m, content: fullContent } : m
             );
           });
         }
       }
 
-      // 保存时去掉光标字符
-      const contentToSave = fullContent || "";
-      if (contentToSave) {
+      // 保存到数据库
+      if (fullContent) {
         await fetch(`/api/projects/${projectId}/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ role: "assistant", content: contentToSave }),
+          body: JSON.stringify({ role: "assistant", content: fullContent }),
         });
-        // 用干净内容替换（去掉光标）
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === aiMsgId ? { ...m, content: contentToSave } : m
-          )
-        );
       }
     } catch (err: unknown) {
       if (err instanceof Error && err.name === "AbortError") {
-        // 从当前 messages 状态中获取已生成的内容（去掉光标）
-        let savedContent = "";
-        setMessages((prev) => {
-          const msg = prev.find((m) => m.id === aiMsgId);
-          savedContent = msg?.content?.replace(/█$/, "") || "";
-          // 同步去掉光标
-          return prev.map((m) =>
-            m.id === aiMsgId ? { ...m, content: savedContent } : m
-          );
-        });
-        if (savedContent) {
-          await fetch(`/api/projects/${projectId}/messages`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ role: "assistant", content: savedContent }),
+        // 如果是删除操作触发的中止，不保存内容（消息已被删除）
+        if (isDeletingRef.current) {
+          isDeletingRef.current = false;
+        } else {
+          // 用户手动停止生成，保存已生成的内容
+          let savedContent = "";
+          setMessages((prev) => {
+            const msg = prev.find((m) => m.id === aiMsgId);
+            savedContent = msg?.content || "";
+            return prev;
           });
+          if (savedContent) {
+            await fetch(`/api/projects/${projectId}/messages`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ role: "assistant", content: savedContent }),
+            });
+          }
         }
       } else {
         console.error("AI 回复失败:", err);
@@ -312,6 +324,7 @@ export default function WorkspacePage() {
       setIsStreaming(false);
       abortControllerRef.current = null;
       streamingMsgIdRef.current = null;
+      isDeletingRef.current = false;
     }
   };
 
@@ -426,12 +439,16 @@ export default function WorkspacePage() {
                       <div className="whitespace-pre-wrap break-words">
                         {msg.role === "assistant" ? (
                           msg.content ? (
-                            <Streamdown
-                              animated
-                              isAnimating={isStreaming && msg.id === messages[messages.length - 1]?.id}
-                            >
-                              {msg.content}
-                            </Streamdown>
+                            <div className={cn(
+                              isStreaming && msg.id === messages[messages.length - 1]?.id && "streaming-cursor"
+                            )}>
+                              <Streamdown
+                                animated
+                                isAnimating={isStreaming && msg.id === messages[messages.length - 1]?.id}
+                              >
+                                {msg.content}
+                              </Streamdown>
+                            </div>
                           ) : (
                             <span className="inline-flex items-center gap-1">
                               <Loader2 className="h-3 w-3 animate-spin" />
