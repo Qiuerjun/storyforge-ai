@@ -1,0 +1,144 @@
+// prisma/schema.prisma
+// StoryForge AI 数据库模型定义
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./storyforge.db"
+}
+
+// ============================================================
+// 项目（Project）- 顶层实体，一个项目对应一部小说或一次跑团
+// ============================================================
+model Project {
+  id           String   @id @default(cuid())
+  name         String                          // 项目名称
+  type         String   @default("novel")      // "novel" | "trpg"
+  description  String   @default("")            // 项目简介
+  systemPrompt String   @default("")            // 项目级系统预设 Prompt
+  coverImage   String?                          // 封面图 URL/Base64（可选）
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // 关联
+  characters   Character[]
+  loreEntries  LoreEntry[]
+  memories     Memory[]
+  messages     Message[]
+  worldStates  WorldState[]
+}
+
+// ============================================================
+// 角色（Character）- 项目下的角色卡
+// ============================================================
+model Character {
+  id          String   @id @default(cuid())
+  projectId   String
+  name        String                              // 角色姓名
+  age         String   @default("")               // 年龄
+  appearance  String   @default("")               // 外貌描述
+  personality String   @default("")               // 性格描述
+  backstory   String   @default("")               // 背景故事
+  hiddenLore  String   @default("")               // 隐藏设定（仅 AI 可见，KP 模式）
+  persona     String   @default("")               // 角色专属 Prompt（语气、口癖）
+  avatarUrl   String?                             // 头像 URL
+  tags        String   @default("[]")             // JSON 数组：角色标签
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // 关联
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+// ============================================================
+// 知识库词条（LoreEntry）- Wiki 式世界观管理
+// ============================================================
+model LoreEntry {
+  id        String   @id @default(cuid())
+  projectId String
+  title     String                              // 词条标题
+  content   String   @default("")               // 词条正文（Markdown）
+  keywords  String   @default("[]")             // JSON 数组：触发词列表
+  category  String   @default("general")        // 分类：geography/history/magic/character/event 等
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // 关联
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([category])
+}
+
+// ============================================================
+// 核心记忆（Memory）- AI 自动提取 + 手动管理
+// ============================================================
+model Memory {
+  id              String   @id @default(cuid())
+  projectId       String
+  content         String                         // 记忆内容（如："亚瑟折断了圣剑"）
+  sourceMessageId String?                        // 来源消息 ID（可选）
+  tags            String   @default("[]")        // JSON 数组：标签（如 ["战斗","亚瑟","圣剑"]）
+  importance      Int      @default(5)           // 重要性 1-10，用于排序
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // 关联
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([importance])
+}
+
+// ============================================================
+// 对话消息（Message）- 聊天/续写历史
+// ============================================================
+model Message {
+  id        String   @id @default(cuid())
+  projectId String
+  role      String                              // "user" | "assistant" | "system"
+  content   String                              // 消息内容
+  isPinned  Boolean  @default(false)            // 是否被用户置顶（强制注入上下文）
+  metadata  String   @default("{}")             // JSON：额外元数据（token 数、模型等）
+  createdAt DateTime @default(now())
+
+  // 关联
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([createdAt])
+}
+
+// ============================================================
+// 世界状态（WorldState）- 键值对式的动态世界变量
+// ============================================================
+model WorldState {
+  id          String   @id @default(cuid())
+  projectId   String
+  key         String                              // 状态键（如："主线进度"、"金币"）
+  value       String   @default("")               // 状态值
+  description String   @default("")               // 描述说明
+  updatedAt   DateTime @updatedAt
+
+  // 关联
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, key])                     // 同一项目下 key 唯一
+  @@index([projectId])
+}
+
+// ============================================================
+// 系统设置（Setting）- 全局配置持久化
+// ============================================================
+model Setting {
+  id    String @id @default("global")            // 单例，固定 ID
+  key   String @unique                           // 设置键
+  value String @default("")                      // 设置值（JSON 字符串）
+
+  @@index([key])
+}

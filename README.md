@@ -1,36 +1,442 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# StoryForge AI
 
-## Getting Started
+> 本地化 AI 小说与跑团辅助创作平台
 
-First, run the development server:
+[![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind-4-38bdf8?logo=tailwindcss)](https://tailwindcss.com/)
+[![Prisma](https://img.shields.io/badge/Prisma-5-2D3748?logo=prisma)](https://www.prisma.io/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+---
+
+## 📖 简介
+
+StoryForge AI 是一个专为小说家和跑团（TRPG）玩家打造的 AI 辅助创作环境。它将大语言模型的能力与结构化的世界观、角色、记忆管理深度结合，解决 AI 写作中"容易遗忘设定"和"逻辑不连贯"的痛点。
+
+### 为什么选择 StoryForge AI？
+
+- **本地化部署** - 数据完全在本地，支持本地模型（Ollama）和云端 API
+- **上下文感知** - 自动注入角色设定、世界观、记忆，保持故事连贯性
+- **流式输出** - 实时显示 AI 生成内容，支持 Markdown 渲染
+- **灵活配置** - 兼容 OpenAI API、Ollama、vLLM 等多种模型后端
+
+---
+
+## ✨ 核心功能
+
+### 📝 创作空间
+- 类似聊天的交互界面，支持流式输出和打字机效果
+- 自动注入项目设定、角色信息、世界状态作为上下文
+- 支持置顶重要信息，作为长期记忆使用
+- 快捷指令系统（`/describe`、`/roll`、`/npc`）
+
+### 👥 角色管理
+- 定义角色性格、外貌、背景、说话风格
+- 支持隐藏设定（KP 模式），仅 AI 可见的秘密信息
+- AI 一键生成角色，支持参考世界观和其他角色
+
+### 🌍 世界观知识库
+- Wiki 式词条管理，支持多种分类（地理、历史、魔法、阵营等）
+- 关键词触发机制，自动注入相关词条到对话上下文
+- AI 一键生成世界观词条
+
+### 🧠 记忆索引
+- AI 自动从对话中提取关键事实和重要事件
+- 支持手动添加和编辑记忆
+- 按重要性分级，标签分类管理
+- 基于关键词的相关性检索
+
+### ⚙️ 灵活配置
+- 支持多种 AI 模型后端（OpenAI、Ollama、vLLM 等）
+- 可调节温度、Top-P、最大 Token 数等参数
+- 浅色/深色主题切换
+
+### 📦 数据导出导入
+- 一键导出项目完整数据为 JSON 文件
+- 支持从 JSON 文件导入项目数据
+- 方便备份、迁移和分享项目
+
+---
+
+## 🛠️ 技术栈
+
+| 类别 | 技术 | 说明 |
+|------|------|------|
+| 框架 | Next.js 16 | App Router, Server Components |
+| 语言 | TypeScript 5 | 类型安全 |
+| 样式 | Tailwind CSS v4 | 原子化 CSS |
+| 组件 | shadcn/ui 风格 | Radix UI + CVA |
+| 数据库 | Prisma 5 + SQLite | 轻量级本地数据库 |
+| AI | Vercel AI SDK | 流式输出支持 |
+| 状态 | Zustand | 轻量级状态管理 |
+| 主题 | next-themes | 浅色/深色/跟随系统 |
+| Markdown | Streamdown | 流式 Markdown 渲染 |
+
+---
+
+## 🚀 快速开始
+
+### 前置要求
+
+- Node.js 18.17 或更高版本
+- npm 9 或更高版本
+- （可选）Ollama - 用于本地模型运行
+
+### 1. 克隆项目
+
+```bash
+git clone https://github.com/Qiuerjun/storyforge-ai.git
+cd storyforge-ai
+```
+
+### 2. 安装依赖
+
+```bash
+npm install
+```
+
+### 3. 初始化数据库
+
+```bash
+npm run db:push
+npm run db:generate
+```
+
+### 4. 启动开发服务器
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+打开 http://localhost:3000 即可访问。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 5. 配置 AI 模型
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+在应用的「设置」页面中配置模型参数：
 
-## Learn More
+#### Ollama（本地运行，推荐）
 
-To learn more about Next.js, take a look at the following resources:
+```
+API Base URL: http://localhost:11434/v1
+API Key: ollama
+Model: llama3 / qwen2 / deepseek-coder 等
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+#### OpenAI
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+API Base URL: https://api.openai.com/v1
+API Key: sk-xxxxxxxxxxxxxxxxxxxxxxxx
+Model: gpt-4o / gpt-4o-mini / gpt-3.5-turbo
+```
 
-## Deploy on Vercel
+#### 其他兼容 API
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+支持任何 OpenAI 兼容接口，如 vLLM、LocalAI、LiteLLM 等。
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+
+## 📁 项目结构
+
+```
+storyforge-ai/
+├── app/                          # Next.js App Router
+│   ├── api/                      # API 路由
+│   │   ├── ai/generate/          # AI 内容生成
+│   │   ├── chat/                 # 流式对话
+│   │   └── projects/             # 项目 CRUD
+│   ├── projects/[projectId]/     # 项目子页面
+│   │   ├── workspace/            # 创作空间
+│   │   ├── characters/           # 角色管理
+│   │   ├── lore/                 # 世界观知识库
+│   │   ├── memory/               # 记忆索引
+│   │   └── settings/             # 项目设置
+│   ├── layout.tsx                # 根布局
+│   └── globals.css               # 全局样式
+├── components/                   # React 组件
+│   ├── ui/                       # 基础 UI 组件
+│   ├── layout/                   # 布局组件
+│   └── ai-generate-dialog.tsx    # AI 生成对话框
+├── lib/                          # 工具函数
+│   ├── ai/                       # AI 相关逻辑
+│   │   ├── context-builder.ts    # 上下文组装
+│   │   ├── lore-matcher.ts       # 知识库匹配
+│   │   └── memory-retriever.ts   # 记忆检索
+│   ├── prisma.ts                 # Prisma 客户端
+│   └── utils.ts                  # 工具函数
+├── stores/                       # Zustand 状态
+│   └── settings-store.ts         # 设置状态
+├── hooks/                        # 自定义 Hooks
+│   └── use-toast.ts              # Toast 通知
+├── prisma/                       # 数据库
+│   └── schema.prisma             # 数据模型
+├── public/                       # 静态资源
+└── package.json                  # 项目配置
+```
+
+---
+
+## 📊 数据模型
+
+### Project（项目）
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | String | 主键 |
+| name | String | 项目名称 |
+| type | String | 类型（novel/trpg） |
+| description | String | 项目描述 |
+| systemPrompt | String | 系统提示词 |
+
+### Character（角色）
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| name | String | 角色名称 |
+| personality | String | 性格描述 |
+| appearance | String | 外貌描述 |
+| backstory | String | 背景故事 |
+| hiddenLore | String | 隐藏设定（仅 AI 可见） |
+| persona | String | 说话风格 |
+
+### LoreEntry（世界观词条）
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| title | String | 词条标题 |
+| content | String | 词条内容 |
+| keywords | String | 触发关键词（JSON 数组） |
+| category | String | 分类 |
+
+### Memory（记忆）
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| content | String | 记忆内容 |
+| tags | String | 标签（JSON 数组） |
+| importance | Int | 重要性 1-10 |
+| sourceMessageId | String | 来源消息 ID |
+
+### Message（消息）
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| role | String | 角色（user/assistant/system） |
+| content | String | 消息内容 |
+| isPinned | Boolean | 是否置顶 |
+
+---
+
+## 🔧 常用命令
+
+| 命令 | 说明 |
+|------|------|
+| `npm run dev` | 启动开发服务器 |
+| `npm run build` | 构建生产版本 |
+| `npm run start` | 启动生产服务器 |
+| `npm run lint` | 运行 ESLint 检查 |
+| `npm run db:push` | 推送数据库 Schema 变更 |
+| `npm run db:generate` | 生成 Prisma 客户端 |
+| `npm run db:studio` | 打开 Prisma Studio（数据库可视化） |
+| `npm run db:seed` | 填充测试数据 |
+
+---
+
+## 🔌 API 文档
+
+### 流式对话
+
+```
+POST /api/chat
+```
+
+**请求体：**
+```json
+{
+  "messages": [
+    { "role": "user", "content": "你好" }
+  ],
+  "projectId": "项目ID",
+  "modelConfig": {
+    "apiBaseUrl": "http://localhost:11434/v1",
+    "apiKey": "ollama",
+    "modelName": "llama3",
+    "temperature": 0.7,
+    "maxTokens": 4096
+  }
+}
+```
+
+**响应：** 流式文本响应（text/plain）
+
+---
+
+### AI 内容生成
+
+```
+POST /api/ai/generate
+```
+
+**请求体：**
+```json
+{
+  "type": "character | lore | project",
+  "projectId": "项目ID",
+  "prompt": "可选的用户提示",
+  "modelConfig": { ... },
+  "options": {
+    "useWorldContext": true,
+    "useOtherCharacters": false
+  }
+}
+```
+
+**响应：**
+```json
+{
+  "success": true,
+  "data": { ... }
+}
+```
+
+---
+
+### 记忆提取
+
+```
+POST /api/projects/:projectId/memory/extract
+```
+
+**请求体：**
+```json
+{
+  "modelConfig": { ... },
+  "messageIds": ["可选的消息ID数组"]
+}
+```
+
+**响应：**
+```json
+{
+  "success": true,
+  "data": [...],
+  "message": "提取了 N 条记忆"
+}
+```
+
+---
+
+### 项目导出
+
+```
+GET /api/projects/:projectId/export
+```
+
+**响应：** JSON 文件下载，包含项目所有数据
+
+**导出数据格式：**
+```json
+{
+  "version": "1.0",
+  "exportedAt": "2025-06-01T00:00:00Z",
+  "project": {
+    "name": "项目名称",
+    "type": "novel",
+    "description": "项目描述",
+    "systemPrompt": "系统提示词"
+  },
+  "characters": [...],
+  "loreEntries": [...],
+  "memories": [...],
+  "messages": [...],
+  "worldStates": [...]
+}
+```
+
+---
+
+### 项目导入
+
+```
+POST /api/projects/import
+```
+
+**请求体：** 与导出格式相同的 JSON 数据
+
+**响应：**
+```json
+{
+  "success": true,
+  "data": { "id": "新项目ID", "name": "项目名称" },
+  "message": "项目导入成功"
+}
+```
+
+---
+
+## 🎨 主题定制
+
+项目使用 CSS 变量定义主题颜色，可在 `app/globals.css` 中修改：
+
+```css
+:root {
+  --primary: oklch(0.45 0.15 260);      /* 主色调 */
+  --background: oklch(0.99 0.002 240);   /* 背景色 */
+  --foreground: oklch(0.15 0.02 260);    /* 前景色 */
+  /* ... 更多变量 */
+}
+```
+
+---
+
+## 🤝 贡献指南
+
+欢迎贡献代码！请遵循以下步骤：
+
+1. Fork 本仓库
+2. 创建特性分支：`git checkout -b feature/amazing-feature`
+3. 提交更改：`git commit -m 'Add amazing feature'`
+4. 推送分支：`git push origin feature/amazing-feature`
+5. 提交 Pull Request
+
+### 开发规范
+
+- 使用 TypeScript 编写代码
+- 遵循 ESLint 规则
+- 组件使用函数式组件 + Hooks
+- 样式使用 Tailwind CSS 工具类
+
+---
+
+## 📝 更新日志
+
+### v0.1.0 (2025-06-01)
+
+- 🎉 初始发布
+- ✨ 创作空间流式对话
+- ✨ 角色管理 + AI 生成
+- ✨ 世界观知识库 + AI 生成
+- ✨ 记忆索引 + 自动提取
+- ✨ 项目设置 + AI 生成
+- ✨ 浅色/深色主题
+- ✨ Markdown 流式渲染（Streamdown）
+- ✨ 项目导出导入功能
+
+---
+
+## 📄 许可证
+
+本项目采用 [MIT 许可证](LICENSE) 开源。
+
+---
+
+## 🙏 致谢
+
+- [Next.js](https://nextjs.org/) - React 框架
+- [Vercel AI SDK](https://sdk.vercel.ai/) - AI 流式输出
+- [shadcn/ui](https://ui.shadcn.com/) - UI 组件设计
+- [Tailwind CSS](https://tailwindcss.com/) - CSS 框架
+- [Prisma](https://www.prisma.io/) - 数据库 ORM
+- [Streamdown](https://github.com/vercel/streamdown) - Markdown 流式渲染
+
+---
+
+## 📧 联系方式
+
+如有问题或建议，欢迎提交 [Issue](https://github.com/Qiuerjun/storyforge-ai/issues)。
