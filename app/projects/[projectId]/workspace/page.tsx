@@ -140,20 +140,20 @@ export default function WorkspacePage() {
       });
     }
 
-    // 先从 UI 移除
+    // 立即从 UI 移除
     setMessages((prev) => prev.filter((m) => m.id !== msgId));
+    toast({ title: "消息已删除" });
 
-    // 尝试从数据库删除（消息可能还未保存到数据库）
+    // 临时 ID（ai-xxx）不在数据库中，无需调 API
+    if (msgId.startsWith("ai-")) return;
+
+    // 静默尝试从数据库删除
     try {
-      const res = await fetch(`/api/projects/${projectId}/messages/${msgId}`, {
+      await fetch(`/api/projects/${projectId}/messages/${msgId}`, {
         method: "DELETE",
       });
-      const data = await res.json();
-      if (data.success) {
-        toast({ title: "消息已删除" });
-      }
-    } catch (err) {
-      console.error("删除消息失败:", err);
+    } catch {
+      // 忽略错误，UI 已移除
     }
   };
 
