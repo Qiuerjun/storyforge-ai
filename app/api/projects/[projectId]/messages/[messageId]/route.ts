@@ -33,7 +33,7 @@ export async function PUT(
   }
 }
 
-/** DELETE - 删除消息 */
+/** DELETE - 删除消息（幂等：记录不存在也返回成功） */
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ projectId: string; messageId: string }> }
@@ -41,7 +41,7 @@ export async function DELETE(
   try {
     const { messageId } = await params;
 
-    await prisma.message.delete({
+    await prisma.message.deleteMany({
       where: { id: messageId },
     });
 
