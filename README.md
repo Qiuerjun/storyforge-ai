@@ -240,6 +240,97 @@ storyforge-ai/
 
 ---
 
+## ❓ 常见问题
+
+### 端口 3000 被占用
+
+启动时提示 `EADDRINUSE` 或 `Port 3000 is already in use`：
+
+```bash
+# Windows - 查找占用端口的进程
+netstat -ano | findstr :3000
+
+# 终止进程（将 XXXX 替换为实际的 PID）
+taskkill /F /PID XXXX
+```
+
+```bash
+# macOS / Linux
+lsof -i :3000
+kill -9 XXXX
+```
+
+### 数据库相关错误
+
+启动时报 Prisma 或数据库错误：
+
+```bash
+# 重新推送数据库 Schema
+npm run db:push
+
+# 重新生成 Prisma 客户端
+npm run db:generate
+
+# 如果仍然失败，删除数据库文件后重新初始化
+# Windows
+del prisma\storyforge.db
+# macOS / Linux
+rm prisma/storyforge.db
+
+npm run db:push
+npm run db:generate
+```
+
+### AI 请求失败 / 连接超时
+
+在设置页面测试连接或对话时报错：
+
+1. **检查模型服务是否运行** — 如果使用 Ollama，确认 `ollama serve` 已启动
+2. **检查 API Base URL** — Ollama 默认为 `http://localhost:11434/v1`，注意 `/v1` 后缀
+3. **检查 API Key** — Ollama 可填任意值（如 `ollama`），OpenAI 需填写有效的 Key
+4. **检查模型名称** — 确认模型已下载，Ollama 可通过 `ollama list` 查看已安装模型
+5. **检查网络代理** — 如果使用云端 API，确认代理设置不会阻断请求
+
+### 依赖安装失败
+
+`npm install` 报错：
+
+```bash
+# 清除缓存后重试
+npm cache clean --force
+npm install
+
+# 如果 node_modules 损坏，删除后重新安装
+# Windows
+rmdir /s /q node_modules
+# macOS / Linux
+rm -rf node_modules
+
+npm install
+```
+
+### 构建失败
+
+`npm run build` 报错：
+
+```bash
+# 清除 Next.js 缓存后重试
+# Windows
+rmdir /s /q .next
+# macOS / Linux
+rm -rf .next
+
+npm run build
+```
+
+### 页面白屏或样式异常
+
+- 确认 Node.js 版本 ≥ 18.17（`node --version`）
+- 尝试硬刷新浏览器（`Ctrl + Shift + R`）
+- 清除浏览器缓存后重新访问
+
+---
+
 ## 🔌 API 文档
 
 ### 流式对话
