@@ -70,6 +70,10 @@ export default function WorkspacePage() {
   const streamingMsgIdRef = useRef<string | null>(null);
   /** 标记是否正在删除消息（阻止 AbortError 处理器重新保存） */
   const isDeletingRef = useRef(false);
+  /** Streamdown 容器 ref，用于注入光标 */
+  const cursorContainerRef = useRef<HTMLDivElement | null>(null);
+  /** 是否有光标在 DOM 中（防止 MutationObserver 自触发） */
+  const hasCursorRef = useRef(false);
 
   /** 滚动到底部 */
   const scrollToBottom = useCallback(() => {
@@ -112,6 +116,71 @@ export default function WorkspacePage() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
+
+  /**
+   * 流式输出光标注入：
+   * Streamdown 把内容渲染为多个 <p> block，CSS ::after 只能跟在所有 block 之后（新一行）。
+   * 用 MutationObserver 把光标 <span> 注入到最后一个 block 的最后一个文本节点内，
+   * 这样光标就紧跟在最后一个字后面，不会换行。
+   */
+  const cursorMsgId = isStreaming ? messages[messages.length - 1]?.id : null;
+  const cursorIsStreaming = isStreaming;
+
+  useEffect(() => {
+    const container = cursorContainerRef.current;
+    if (!cursorMsgId || !cursorIsStreaming || !container) return;
+
+    const CURSOR_CLASS = "streamdown-cursor";
+
+    function injectCursor() {
+      if (!container) return;
+      // 清理旧光标
+      container.querySelectorAll(`.${CURSOR_CLASS}`).forEach((el) => el.remove());
+      hasCursorRef.current = false;
+
+      // 找到最后一个元素节点（Streamdown 渲染的 <p> 等）
+      const children = Array.from(container.children);
+      const lastEl = children[children.length - 1];
+      if (!lastEl) return;
+
+      // 创建光标元素
+      const cursor = document.createElement("span");
+      cursor.className = CURSOR_CLASS;
+      cursor.textContent = "█";
+
+      // 找到最后一个文本节点，在其末尾插入光标
+      const walker = document.createTreeWalker(lastEl, NodeFilter.SHOW_TEXT);
+      let lastTextNode: Text | null = null;
+      let node: Text | null;
+      while ((node = walker.nextNode() as Text | null)) {
+        lastTextNode = node;
+      }
+
+      if (lastTextNode) {
+        lastTextNode.parentNode?.insertBefore(cursor, lastTextNode.nextSibling);
+      } else {
+        lastEl.appendChild(cursor);
+      }
+      hasCursorRef.current = true;
+    }
+
+    injectCursor();
+
+    // 监听 Streamdown 内容变化，重新注入光标
+    const observer = new MutationObserver(() => {
+      if (hasCursorRef.current) {
+        hasCursorRef.current = false;
+      }
+      injectCursor();
+    });
+    observer.observe(container, { childList: true, subtree: true, characterData: true });
+
+    return () => {
+      observer.disconnect();
+      container.querySelectorAll(`.${CURSOR_CLASS}`).forEach((el) => el.remove());
+      hasCursorRef.current = false;
+    };
+  }, [cursorMsgId, cursorIsStreaming]);
 
   /** 停止生成 */
   const handleStop = () => {
@@ -439,9 +508,7 @@ export default function WorkspacePage() {
                       <div className="whitespace-pre-wrap break-words">
                         {msg.role === "assistant" ? (
                           msg.content ? (
-                            <div className={cn(
-                              isStreaming && msg.id === messages[messages.length - 1]?.id && "streaming-cursor"
-                            )}>
+                            <div ref={isStreaming && msg.id === messages[messages.length - 1]?.id ? cursorContainerRef : undefined}>
                               <Streamdown
                                 animated
                                 isAnimating={isStreaming && msg.id === messages[messages.length - 1]?.id}
