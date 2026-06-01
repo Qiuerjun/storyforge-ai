@@ -28,7 +28,6 @@ export async function POST(request: NextRequest) {
     const modelName = modelConfig?.modelName || "llama3";
     const temperature = modelConfig?.temperature ?? 0.7;
     const topP = modelConfig?.topP ?? 0.9;
-    const maxTokens = modelConfig?.maxTokens ?? 4096;
 
     // 验证模型配置
     if (!apiBaseUrl) {
@@ -112,6 +111,8 @@ export async function POST(request: NextRequest) {
     }
 
     // 流式输出（使用 chat 接口确保兼容性）
+    // 不设置 maxOutputTokens，让模型自然生成直到完成（EOS），
+    // 避免小说创作等长文本场景下内容被硬截断
     const result = streamText({
       model: openai.chat(modelName),
       system: systemPrompt,
@@ -121,7 +122,6 @@ export async function POST(request: NextRequest) {
       })),
       temperature,
       topP,
-      maxOutputTokens: maxTokens,
     });
 
     return result.toTextStreamResponse();
