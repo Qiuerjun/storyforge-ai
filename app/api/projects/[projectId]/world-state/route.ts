@@ -1,8 +1,10 @@
 // app/api/projects/[projectId]/world-state/route.ts
-// 世界状态 API - GET 列表 / POST 创建 / PUT 批量更新
+// 世界状态 API - GET 列表 / POST 创建 / DELETE 删除
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { badRequest, notFound, serverError, handleJsonError } from "@/lib/api/errors";
+import { sanitizeString, LIMITS } from "@/lib/api/validation";
 
 /** GET - 获取世界状态列表 */
 export async function GET(
@@ -19,11 +21,7 @@ export async function GET(
 
     return NextResponse.json({ success: true, data: states });
   } catch (error) {
-    console.error("获取世界状态失败:", error);
-    return NextResponse.json(
-      { success: false, error: "获取世界状态失败" },
-      { status: 500 }
-    );
+    return serverError("获取世界状态失败", error, "WorldStateAPI");
   }
 }
 
@@ -34,43 +32,43 @@ export async function POST(
 ) {
   try {
     const { projectId } = await params;
-    const body = await request.json();
-    const { key, value, description } = body;
 
-    if (!key || !key.trim()) {
-      return NextResponse.json(
-        { success: false, error: "状态键不能为空" },
-        { status: 400 }
-      );
+    // 验证项目存在
+    const project = await prisma.project.findUnique({ where: { id: projectId } });
+    if (!project) {
+      return notFound("项目不存在");
     }
+
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch (error) {
+      return handleJsonError(error);
+    }
+
+    const key = sanitizeString(body.key, LIMITS.WORLD_STATE_KEY.max, LIMITS.WORLD_STATE_KEY.min);
+    if (key === null) {
+      return badRequest("状态键不能为空，且不能超过 " + LIMITS.WORLD_STATE_KEY.max + " 字符");
+    }
+
+    const value = sanitizeString(body.value ?? "", LIMITS.WORLD_STATE_VALUE.max) ?? "";
+    const description = sanitizeString(body.description ?? "", LIMITS.WORLD_STATE_DESCRIPTION.max) ?? "";
 
     // 使用 upsert 实现"存在则更新，不存在则创建"
     const state = await prisma.worldState.upsert({
       where: {
         projectId_key: {
           projectId,
-          key: key.trim(),
+          key,
         },
       },
-      update: {
-        value: value || "",
-        description: description || "",
-      },
-      create: {
-        projectId,
-        key: key.trim(),
-        value: value || "",
-        description: description || "",
-      },
+      update: { value, description },
+      create: { projectId, key, value, description },
     });
 
     return NextResponse.json({ success: true, data: state });
   } catch (error) {
-    console.error("更新世界状态失败:", error);
-    return NextResponse.json(
-      { success: false, error: "更新世界状态失败" },
-      { status: 500 }
-    );
+    return serverError("更新世界状态失败", error, "WorldStateAPI");
   }
 }
 
@@ -85,27 +83,28 @@ export async function DELETE(
     const key = searchParams.get("key");
 
     if (!key) {
-      return NextResponse.json(
-        { success: false, error: "缺少 key 参数" },
-        { status: 400 }
-      );
+      return badRequest("缺少 key 参数");
+    }
+
+    // 验证世界状态存在且属于该项目
+    const existing = await prisma.worldState.findUnique({
+      where: {
+        projectId_key: { projectId, key },
+      },
+    });
+
+    if (!existing) {
+      return notFound("世界状态不存在");
     }
 
     await prisma.worldState.delete({
       where: {
-        projectId_key: {
-          projectId,
-          key,
-        },
+        projectId_key: { projectId, key },
       },
     });
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("删除世界状态失败:", error);
-    return NextResponse.json(
-      { success: false, error: "删除世界状态失败" },
-      { status: 500 }
-    );
+    return serverError("删除世界状态失败", error, "WorldStateAPI");
   }
 }

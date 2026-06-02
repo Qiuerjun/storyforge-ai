@@ -2,22 +2,28 @@
 // 模型列表代理 API - 获取可用模型列表（避免浏览器 CORS 限制）
 
 import { NextRequest, NextResponse } from "next/server";
+import { badRequest, serverError } from "@/lib/api/errors";
+import { validateExternalUrl } from "@/lib/api/url-security";
+import { LIMITS } from "@/lib/api/validation";
 
 /** POST /api/models - 获取模型列表 */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { apiBaseUrl, apiKey } = body;
+    const body: Record<string, unknown> = await request.json();
+    const apiBaseUrl = typeof body.apiBaseUrl === "string" ? body.apiBaseUrl : "";
+    const apiKey = typeof body.apiKey === "string" ? body.apiKey : undefined;
 
-    if (!apiBaseUrl) {
-      return NextResponse.json(
-        { success: false, error: "API Base URL 不能为空" },
-        { status: 400 }
-      );
+    if (!apiBaseUrl || typeof apiBaseUrl !== "string") {
+      return badRequest("API Base URL 不能为空");
     }
 
-    // 规范化 URL（去除末尾斜杠）
-    const baseUrl = apiBaseUrl.replace(/\/+$/, "");
+    const baseUrl = apiBaseUrl.replace(/\/+$/, "").slice(0, LIMITS.API_BASE_URL.max);
+
+    // SSRF 防护：验证 URL 安全性
+    const urlCheck = validateExternalUrl(baseUrl);
+    if (urlCheck !== true) {
+      return badRequest(urlCheck);
+    }
 
     // 尝试 OpenAI 兼容接口: GET /models
     const models = await fetchOpenAICompatibleModels(baseUrl, apiKey);
@@ -37,20 +43,12 @@ export async function POST(request: NextRequest) {
       { status: 404 }
     );
   } catch (error) {
-    console.error("获取模型列表失败:", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: `获取模型列表失败: ${error instanceof Error ? error.message : "未知错误"}`,
-      },
-      { status: 500 }
-    );
+    return serverError("获取模型列表失败", error, "ModelsAPI");
   }
 }
 
 /**
  * 尝试通过 OpenAI 兼容接口获取模型列表
- * 接口: GET {baseUrl}/models
  */
 async function fetchOpenAICompatibleModels(
   baseUrl: string,
@@ -61,14 +59,14 @@ async function fetchOpenAICompatibleModels(
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
-    if (apiKey) {
+    if (typeof apiKey === "string" && apiKey) {
       headers["Authorization"] = `Bearer ${apiKey}`;
     }
 
     const response = await fetch(url, {
       method: "GET",
       headers,
-      signal: AbortSignal.timeout(10000), // 10 秒超时
+      signal: AbortSignal.timeout(10000),
     });
 
     if (!response.ok) {
@@ -93,8 +91,6 @@ async function fetchOpenAICompatibleModels(
 
 /**
  * 尝试通过 Ollama 原生接口获取模型列表
- * 接口: GET {baseUrl}/api/tags
- * 注意: baseUrl 可能以 /v1 结尾，需要去掉
  */
 async function fetchOllamaModels(baseUrl: string): Promise<string[]> {
   try {

@@ -3,6 +3,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { badRequest, notFound, serverError, handleJsonError } from "@/lib/api/errors";
+import { sanitizeString, sanitizeJsonArray, sanitizeImportance, sanitizePagination, LIMITS } from "@/lib/api/validation";
 
 /** GET - 获取记忆列表 */
 export async function GET(
@@ -11,9 +13,7 @@ export async function GET(
 ) {
   try {
     const { projectId } = await params;
-    const { searchParams } = new URL(request.url);
-    const limit = parseInt(searchParams.get("limit") || "50");
-    const offset = parseInt(searchParams.get("offset") || "0");
+    const { limit, offset } = sanitizePagination(new URL(request.url).searchParams);
 
     const memories = await prisma.memory.findMany({
       where: { projectId },
@@ -31,11 +31,7 @@ export async function GET(
       data: { items: memories, total },
     });
   } catch (error) {
-    console.error("获取记忆列表失败:", error);
-    return NextResponse.json(
-      { success: false, error: "获取记忆列表失败" },
-      { status: 500 }
-    );
+    return serverError("获取记忆列表失败", error, "MemoriesAPI");
   }
 }
 
@@ -46,23 +42,49 @@ export async function POST(
 ) {
   try {
     const { projectId } = await params;
-    const body = await request.json();
-    const { content, sourceMessageId, tags, importance } = body;
 
-    if (!content || !content.trim()) {
-      return NextResponse.json(
-        { success: false, error: "记忆内容不能为空" },
-        { status: 400 }
-      );
+    // 验证项目存在
+    const project = await prisma.project.findUnique({ where: { id: projectId } });
+    if (!project) {
+      return notFound("项目不存在");
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch (error) {
+      return handleJsonError(error);
+    }
+
+    const content = sanitizeString(body.content, LIMITS.MEMORY_CONTENT.max, LIMITS.MEMORY_CONTENT.min);
+    if (content === null) {
+      return badRequest("记忆内容不能为空，且不能超过 " + LIMITS.MEMORY_CONTENT.max + " 字符");
+    }
+
+    const sourceMessageId = typeof body.sourceMessageId === "string" ? body.sourceMessageId : null;
+    const importance = sanitizeImportance(body.importance);
+
+    const tags = Array.isArray(body.tags)
+      ? sanitizeJsonArray(body.tags, LIMITS.MEMORY_TAGS.maxArrayLength, LIMITS.MEMORY_TAGS.maxItemLength)
+      : null;
+
+    // 如果提供了 sourceMessageId，验证它属于同一项目
+    if (sourceMessageId) {
+      const sourceMsg = await prisma.message.findUnique({
+        where: { id: sourceMessageId },
+      });
+      if (!sourceMsg || sourceMsg.projectId !== projectId) {
+        return badRequest("来源消息不存在或不属于当前项目");
+      }
     }
 
     const memory = await prisma.memory.create({
       data: {
         projectId,
-        content: content.trim(),
-        sourceMessageId: sourceMessageId || null,
+        content,
+        sourceMessageId,
         tags: JSON.stringify(tags || []),
-        importance: importance || 5,
+        importance,
       },
     });
 
@@ -71,10 +93,6 @@ export async function POST(
       { status: 201 }
     );
   } catch (error) {
-    console.error("创建记忆失败:", error);
-    return NextResponse.json(
-      { success: false, error: "创建记忆失败" },
-      { status: 500 }
-    );
+    return serverError("创建记忆失败", error, "MemoriesAPI");
   }
 }

@@ -5,6 +5,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateText } from "ai";
 import { prisma } from "@/lib/prisma";
+import { badRequest, notFound, serverError, handleJsonError } from "@/lib/api/errors";
+import { validateExternalUrl } from "@/lib/api/url-security";
+import { sanitizeModelConfig, sanitizeImportance } from "@/lib/api/validation";
 
 /** POST - 从最近对话中提取记忆 */
 export async function POST(
@@ -13,24 +16,58 @@ export async function POST(
 ) {
   try {
     const { projectId } = await params;
-    const body = await request.json();
-    const { modelConfig, messageIds } = body;
+
+    // 验证项目存在
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+    });
+    if (!project) {
+      return notFound("项目不存在");
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch (error) {
+      return handleJsonError(error);
+    }
+
+    const rawMessageIds = body.messageIds;
+    const modelConfig = sanitizeModelConfig(body.modelConfig);
+
+    // 获取模型配置
+    const apiBaseUrl = modelConfig?.apiBaseUrl || "";
+    const apiKey = modelConfig?.apiKey || "";
+    const modelName = modelConfig?.modelName || "llama3";
+
+    if (!apiBaseUrl) {
+      return badRequest("请先在设置中配置 API Base URL");
+    }
+
+    // SSRF 防护
+    const urlCheck = validateExternalUrl(apiBaseUrl);
+    if (urlCheck !== true) {
+      return badRequest(urlCheck);
+    }
 
     // 获取要分析的消息
     let messages;
-    if (messageIds && messageIds.length > 0) {
+    if (Array.isArray(rawMessageIds) && rawMessageIds.length > 0) {
+      // 限制最多分析 50 条消息
+      const validIds = rawMessageIds
+        .filter((id): id is string => typeof id === "string")
+        .slice(0, 50);
       messages = await prisma.message.findMany({
-        where: { id: { in: messageIds } },
+        where: { id: { in: validIds }, projectId },
         orderBy: { createdAt: "asc" },
       });
     } else {
-      // 默认分析最近 10 条消息
       messages = await prisma.message.findMany({
         where: { projectId },
         orderBy: { createdAt: "desc" },
         take: 10,
       });
-      messages.reverse(); // 按时间正序
+      messages.reverse();
     }
 
     if (messages.length === 0) {
@@ -41,32 +78,16 @@ export async function POST(
       });
     }
 
-    // 获取模型配置
-    const apiBaseUrl = modelConfig?.apiBaseUrl || "http://localhost:11434/v1";
-    const apiKey = modelConfig?.apiKey || "ollama";
-    const modelName = modelConfig?.modelName || "llama3";
-
     const openai = createOpenAI({
       baseURL: apiBaseUrl,
-      apiKey: apiKey,
-      fetch: async (url: string | URL | Request, init?: RequestInit) => {
-        const response = await fetch(url, init);
-        if (!response.ok) {
-          const errorText = await response.text().catch(() => '');
-          throw new Error(
-            `AI 服务返回错误 ${response.status}: ${errorText || response.statusText} (请求地址: ${url})`
-          );
-        }
-        return response;
-      },
+      apiKey: apiKey || "ollama",
     });
 
-    // 构建对话文本
+    // 构建对话文本（限制总长度）
     const conversationText = messages
-      .map((m) => `[${m.role === "user" ? "用户" : "AI"}] ${m.content}`)
+      .map((m) => `[${m.role === "user" ? "用户" : "AI"}] ${m.content.slice(0, 500)}`)
       .join("\n");
 
-    // 调用 AI 提取关键记忆（使用 chat 接口确保兼容性）
     const { text } = await generateText({
       model: openai.chat(modelName),
       prompt: `请从以下对话或故事内容中提取关键信息，作为故事记忆保存。
@@ -105,16 +126,34 @@ ${conversationText}
     }> = [];
 
     try {
-      // 尝试提取 JSON 部分
       const jsonMatch = text.match(/\[[\s\S]*\]/);
       if (jsonMatch) {
-        extractedMemories = JSON.parse(jsonMatch[0]);
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (Array.isArray(parsed)) {
+          extractedMemories = parsed
+            .filter((m: unknown) => {
+              if (!m || typeof m !== "object") return false;
+              const mem = m as Record<string, unknown>;
+              return typeof mem.content === "string" && mem.content.length > 3;
+            })
+            .map((m: unknown) => {
+              const mem = m as Record<string, unknown>;
+              return {
+                content: String(mem.content).slice(0, 200),
+                tags: Array.isArray(mem.tags)
+                  ? mem.tags.filter((t: unknown) => typeof t === "string").slice(0, 10)
+                  : [],
+                importance: sanitizeImportance(mem.importance),
+              };
+            })
+            .slice(0, 20); // 最多 20 条
+        }
       }
     } catch {
       // 如果 AI 没有返回标准 JSON，尝试简单提取
       const lines = text.split("\n").filter((l) => l.trim() && !l.startsWith("[") && !l.startsWith("]"));
       extractedMemories = lines.slice(0, 5).map((line) => ({
-        content: line.replace(/^[-*•]\s*/, "").replace(/^[0-9]+[.、]\s*/, "").trim(),
+        content: line.replace(/^[-*•]\s*/, "").replace(/^[0-9]+[.、]\s*/, "").trim().slice(0, 200),
         tags: [],
         importance: 5,
       })).filter(m => m.content.length > 5);
@@ -129,7 +168,7 @@ ${conversationText}
             projectId,
             content: mem.content,
             tags: JSON.stringify(mem.tags || []),
-            importance: Math.min(10, Math.max(1, mem.importance || 5)),
+            importance: mem.importance,
             sourceMessageId: messages[messages.length - 1]?.id || null,
           },
         });
@@ -143,10 +182,6 @@ ${conversationText}
       message: `提取了 ${savedMemories.length} 条记忆`,
     });
   } catch (error) {
-    console.error("记忆提取失败:", error);
-    return NextResponse.json(
-      { success: false, error: "记忆提取失败" },
-      { status: 500 }
-    );
+    return serverError("记忆提取失败，请检查模型配置", error, "MemoryExtractAPI");
   }
 }

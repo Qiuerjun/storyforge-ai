@@ -3,6 +3,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { badRequest, notFound, serverError, handleJsonError } from "@/lib/api/errors";
+import { sanitizeString, sanitizeJsonArray, LIMITS } from "@/lib/api/validation";
 
 /** GET - 获取项目下的角色列表 */
 export async function GET(
@@ -19,11 +21,7 @@ export async function GET(
 
     return NextResponse.json({ success: true, data: characters });
   } catch (error) {
-    console.error("获取角色列表失败:", error);
-    return NextResponse.json(
-      { success: false, error: "获取角色列表失败" },
-      { status: 500 }
-    );
+    return serverError("获取角色列表失败", error, "CharactersAPI");
   }
 }
 
@@ -34,26 +32,39 @@ export async function POST(
 ) {
   try {
     const { projectId } = await params;
-    const body = await request.json();
-    const { name, age, appearance, personality, backstory, hiddenLore, persona, tags } = body;
 
-    if (!name || !name.trim()) {
-      return NextResponse.json(
-        { success: false, error: "角色名称不能为空" },
-        { status: 400 }
-      );
+    // 验证项目存在
+    const project = await prisma.project.findUnique({ where: { id: projectId } });
+    if (!project) {
+      return notFound("项目不存在");
     }
+
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch (error) {
+      return handleJsonError(error);
+    }
+
+    const name = sanitizeString(body.name, LIMITS.CHARACTER_NAME.max, LIMITS.CHARACTER_NAME.min);
+    if (name === null) {
+      return badRequest("角色名称不能为空，且不能超过 " + LIMITS.CHARACTER_NAME.max + " 字符");
+    }
+
+    const tags = Array.isArray(body.tags)
+      ? sanitizeJsonArray(body.tags, LIMITS.CHARACTER_TAGS.maxArrayLength, LIMITS.CHARACTER_TAGS.maxItemLength)
+      : null;
 
     const character = await prisma.character.create({
       data: {
         projectId,
-        name: name.trim(),
-        age: age || "",
-        appearance: appearance || "",
-        personality: personality || "",
-        backstory: backstory || "",
-        hiddenLore: hiddenLore || "",
-        persona: persona || "",
+        name,
+        age: sanitizeString(body.age ?? "", LIMITS.CHARACTER_FIELD.max) ?? "",
+        appearance: sanitizeString(body.appearance ?? "", LIMITS.CHARACTER_FIELD.max) ?? "",
+        personality: sanitizeString(body.personality ?? "", LIMITS.CHARACTER_FIELD.max) ?? "",
+        backstory: sanitizeString(body.backstory ?? "", LIMITS.CHARACTER_FIELD.max) ?? "",
+        hiddenLore: sanitizeString(body.hiddenLore ?? "", LIMITS.CHARACTER_FIELD.max) ?? "",
+        persona: sanitizeString(body.persona ?? "", LIMITS.CHARACTER_FIELD.max) ?? "",
         tags: JSON.stringify(tags || []),
       },
     });
@@ -63,10 +74,6 @@ export async function POST(
       { status: 201 }
     );
   } catch (error) {
-    console.error("创建角色失败:", error);
-    return NextResponse.json(
-      { success: false, error: "创建角色失败" },
-      { status: 500 }
-    );
+    return serverError("创建角色失败", error, "CharactersAPI");
   }
 }

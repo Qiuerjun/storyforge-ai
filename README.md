@@ -172,6 +172,10 @@ storyforge-ai/
 │   │   ├── context-builder.ts    # 上下文组装
 │   │   ├── lore-matcher.ts       # 知识库匹配
 │   │   └── memory-retriever.ts   # 记忆检索
+│   ├── api/                      # API 安全与校验
+│   │   ├── validation.ts         # 输入校验工具
+│   │   ├── errors.ts             # 统一错误响应
+│   │   └── url-security.ts       # SSRF 防护
 │   ├── prisma.ts                 # Prisma 客户端
 │   └── utils.ts                  # 工具函数
 ├── stores/                       # Zustand 状态
@@ -240,6 +244,7 @@ storyforge-ai/
 | `npm run build` | 构建生产版本 |
 | `npm run start` | 启动生产服务器 |
 | `npm run lint` | 运行 ESLint 检查 |
+| `npm run typecheck` | 运行 TypeScript 类型检查 |
 | `npm run db:push` | 推送数据库 Schema 变更 |
 | `npm run db:generate` | 生成 Prisma 客户端 |
 | `npm run db:studio` | 打开 Prisma Studio（数据库可视化） |
@@ -505,6 +510,19 @@ POST /api/projects/import
 ---
 
 ## 📝 更新日志
+
+### v0.3.0 (2026-06-02)
+
+- 🔒 安全加固：SSRF 防护（限制服务端出站请求目标）
+- 🔒 安全加固：IDOR 防护（所有子资源操作验证项目归属）
+- 🔒 安全加固：全接口输入校验（字符串长度、枚举值、数组格式、数值范围）
+- 🔒 安全加固：导入字段白名单 + 类型检查 + 大小限制
+- 🔒 安全加固：错误响应不再泄露内部 URL 和配置细节
+- 🔒 安全加固：导出不再包含消息 metadata
+- 🐘 新增 `lib/api/` 安全工具库（validation / errors / url-security）
+- 🐘 新增 `npm run typecheck` 命令
+- 🐘 新增 `.env.example` 环境变量示例
+- 🐎 `generateId()` 改用 `crypto.randomUUID()`
 
 ### v0.2.0 (2026-06-01)
 

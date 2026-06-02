@@ -170,6 +170,10 @@ storyforge-ai/
 │   │   ├── context-builder.ts    # Context Assembly
 │   │   ├── lore-matcher.ts       # Knowledge Base Matching
 │   │   └── memory-retriever.ts   # Memory Retrieval
+│   ├── api/                      # API Security & Validation
+│   │   ├── validation.ts         # Input Validation Utilities
+│   │   ├── errors.ts             # Unified Error Responses
+│   │   └── url-security.ts       # SSRF Protection
 │   ├── prisma.ts                 # Prisma Client
 │   └── utils.ts                  # Utility Functions
 ├── stores/                       # Zustand State
@@ -238,6 +242,7 @@ storyforge-ai/
 | `npm run build` | Build Production Version |
 | `npm run start` | Start Production Server |
 | `npm run lint` | Run ESLint Check |
+| `npm run typecheck` | Run TypeScript Type Check |
 | `npm run db:push` | Push Database Schema Changes |
 | `npm run db:generate` | Generate Prisma Client |
 | `npm run db:studio` | Open Prisma Studio (Database Visualization) |
@@ -503,6 +508,19 @@ Contributions are welcome! Please follow these steps:
 ---
 
 ## 📝 Changelog
+
+### v0.3.0 (2026-06-02)
+
+- 🔒 Security: SSRF protection (restrict server-side outbound request targets)
+- 🔒 Security: IDOR protection (all sub-resource operations verify project ownership)
+- 🔒 Security: Input validation on all endpoints (string length, enums, arrays, numeric ranges)
+- 🔒 Security: Import field whitelisting + type checking + size limits
+- 🔒 Security: Error responses no longer leak internal URLs or config details
+- 🔒 Security: Export no longer includes message metadata
+- 🐘 Added `lib/api/` security utility library (validation / errors / url-security)
+- 🐘 Added `npm run typecheck` command
+- 🐘 Added `.env.example` environment variable template
+- 🐎 `generateId()` now uses `crypto.randomUUID()`
 
 ### v0.2.0 (2026-06-01)
 

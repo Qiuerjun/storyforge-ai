@@ -5,73 +5,63 @@ import { NextRequest, NextResponse } from "next/server";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateText } from "ai";
 import { prisma } from "@/lib/prisma";
+import { badRequest, notFound, serverError, handleJsonError } from "@/lib/api/errors";
+import { validateExternalUrl } from "@/lib/api/url-security";
+import {
+  sanitizeModelConfig,
+  sanitizeString,
+  isValidGenerateType,
+  LIMITS,
+} from "@/lib/api/validation";
 
 /** 最大生成时间（秒） */
 export const maxDuration = 120;
 
-/** 生成类型 */
-type GenerateType = "character" | "lore" | "project";
-
-/** 请求体接口 */
-interface GenerateRequest {
-  type: GenerateType;
-  projectId: string;
-  prompt?: string;
-  modelConfig?: {
-    apiBaseUrl?: string;
-    apiKey?: string;
-    modelName?: string;
-    temperature?: number;
-    maxTokens?: number;
-  };
-  options?: {
-    useWorldContext?: boolean;
-    useOtherCharacters?: boolean;
-  };
-}
-
 /** POST /api/ai/generate - AI 生成内容 */
 export async function POST(request: NextRequest) {
   try {
-    const body: GenerateRequest = await request.json();
-    const { type, projectId, prompt, modelConfig, options } = body;
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch (error) {
+      return handleJsonError(error);
+    }
 
-    if (!type || !projectId) {
-      return NextResponse.json(
-        { success: false, error: "缺少必要参数" },
-        { status: 400 }
-      );
+    const type = body.type;
+    const projectId = body.projectId;
+    const prompt = body.prompt;
+    const options = body.options as Record<string, unknown> | undefined;
+
+    if (!isValidGenerateType(type)) {
+      return badRequest("无效的生成类型，必须是 character、lore 或 project");
+    }
+
+    if (typeof projectId !== "string" || !projectId.trim()) {
+      return badRequest("缺少项目 ID");
     }
 
     // 获取模型配置
-    const apiBaseUrl = modelConfig?.apiBaseUrl || "http://localhost:11434/v1";
-    const apiKey = modelConfig?.apiKey || "ollama";
+    const modelConfig = sanitizeModelConfig(body.modelConfig);
+    const apiBaseUrl = modelConfig?.apiBaseUrl || "";
+    const apiKey = modelConfig?.apiKey || "";
     const modelName = modelConfig?.modelName || "llama3";
     const temperature = modelConfig?.temperature ?? 0.8;
     const maxTokens = modelConfig?.maxTokens ?? 2000;
 
-    // 验证模型配置
     if (!apiBaseUrl) {
-      return NextResponse.json(
-        { success: false, error: "请先在设置中配置 API Base URL" },
-        { status: 400 }
-      );
+      return badRequest("请先在设置中配置 API Base URL");
     }
 
-    // 创建 OpenAI 兼容客户端（带自定义 fetch 以提供更好的错误信息）
+    // SSRF 防护
+    const urlCheck = validateExternalUrl(apiBaseUrl);
+    if (urlCheck !== true) {
+      return badRequest(urlCheck);
+    }
+
+    // 创建 OpenAI 兼容客户端
     const openai = createOpenAI({
       baseURL: apiBaseUrl,
-      apiKey,
-      fetch: async (url: string | URL | Request, init?: RequestInit) => {
-        const response = await fetch(url, init);
-        if (!response.ok) {
-          const errorText = await response.text().catch(() => '');
-          throw new Error(
-            `AI 服务返回错误 ${response.status}: ${errorText || response.statusText} (请求地址: ${url})`
-          );
-        }
-        return response;
-      },
+      apiKey: apiKey || "ollama",
     });
 
     // 获取项目信息
@@ -80,22 +70,23 @@ export async function POST(request: NextRequest) {
     });
 
     if (!project) {
-      return NextResponse.json(
-        { success: false, error: "项目不存在" },
-        { status: 404 }
-      );
+      return notFound("项目不存在");
     }
 
     // 根据类型组装 prompt
     let systemPrompt = "";
     let userPrompt = "";
 
+    const safePrompt = typeof prompt === "string"
+      ? prompt.slice(0, 5000)
+      : undefined;
+
     switch (type) {
       case "character":
         ({ systemPrompt, userPrompt } = await buildCharacterPrompt(
           projectId,
           project,
-          prompt,
+          safePrompt,
           options
         ));
         break;
@@ -103,15 +94,15 @@ export async function POST(request: NextRequest) {
         ({ systemPrompt, userPrompt } = await buildLorePrompt(
           projectId,
           project,
-          prompt
+          safePrompt
         ));
         break;
       case "project":
-        ({ systemPrompt, userPrompt } = buildProjectPrompt(project, prompt));
+        ({ systemPrompt, userPrompt } = buildProjectPrompt(project, safePrompt));
         break;
     }
 
-    // 调用 AI 生成（使用 chat 接口确保兼容性）
+    // 调用 AI 生成
     const { text } = await generateText({
       model: openai.chat(modelName),
       system: systemPrompt,
@@ -125,15 +116,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, data: result });
   } catch (error) {
-    console.error("AI 生成失败:", error);
-
-    // 直接返回原始错误信息，方便排查
-    const errorMessage = error instanceof Error ? error.message : String(error);
-
-    return NextResponse.json(
-      { success: false, error: `AI 生成失败: ${errorMessage}` },
-      { status: 500 }
-    );
+    return serverError("AI 生成失败，请检查模型配置", error, "AIGenerateAPI");
   }
 }
 
@@ -142,17 +125,15 @@ async function buildCharacterPrompt(
   projectId: string,
   project: { name: string; type: string; description: string; systemPrompt: string },
   userPrompt?: string,
-  options?: { useWorldContext?: boolean; useOtherCharacters?: boolean }
+  options?: Record<string, unknown>
 ) {
   let context = "";
 
-  // 项目基本信息
   context += `项目名称：${project.name}\n`;
   context += `项目类型：${project.type === "trpg" ? "跑团(TRPG)" : "小说"}\n`;
   if (project.description) context += `项目描述：${project.description}\n`;
   if (project.systemPrompt) context += `项目设定：${project.systemPrompt}\n`;
 
-  // 根据选项加载世界观
   if (options?.useWorldContext) {
     const loreEntries = await prisma.loreEntry.findMany({
       where: { projectId },
@@ -167,7 +148,6 @@ async function buildCharacterPrompt(
     }
   }
 
-  // 根据选项加载其他角色
   if (options?.useOtherCharacters) {
     const characters = await prisma.character.findMany({
       where: { projectId },
@@ -226,7 +206,6 @@ async function buildLorePrompt(
   if (project.description) context += `项目描述：${project.description}\n`;
   if (project.systemPrompt) context += `项目设定：${project.systemPrompt}\n`;
 
-  // 加载已有世界观
   const existingLore = await prisma.loreEntry.findMany({
     where: { projectId },
     take: 10,
@@ -294,10 +273,9 @@ function buildProjectPrompt(
 /** 解析 AI 返回的 JSON */
 function parseGeneratedJSON(
   text: string,
-  type: GenerateType
+  type: string
 ): Record<string, unknown> {
   try {
-    // 尝试提取 JSON 部分
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       return JSON.parse(jsonMatch[0]);
@@ -306,7 +284,6 @@ function parseGeneratedJSON(
     // JSON 解析失败
   }
 
-  // 解析失败时返回原始文本
   switch (type) {
     case "character":
       return { name: "未命名角色", backstory: text };
@@ -314,5 +291,7 @@ function parseGeneratedJSON(
       return { title: "未命名词条", content: text, keywords: [], category: "general" };
     case "project":
       return { description: text, systemPrompt: "" };
+    default:
+      return { raw: text };
   }
 }

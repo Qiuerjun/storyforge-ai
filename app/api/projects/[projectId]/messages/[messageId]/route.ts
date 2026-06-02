@@ -3,6 +3,20 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { badRequest, notFound, serverError, handleJsonError } from "@/lib/api/errors";
+import { sanitizeString, sanitizeBoolean, LIMITS } from "@/lib/api/validation";
+
+/**
+ * 验证消息是否属于指定项目
+ */
+async function getMessageOrError(messageId: string, projectId: string) {
+  const message = await prisma.message.findUnique({
+    where: { id: messageId },
+  });
+  if (!message) return { error: notFound("消息不存在") };
+  if (message.projectId !== projectId) return { error: notFound("消息不存在") };
+  return { message };
+}
 
 /** PUT - 更新消息内容 */
 export async function PUT(
@@ -10,26 +24,41 @@ export async function PUT(
   { params }: { params: Promise<{ projectId: string; messageId: string }> }
 ) {
   try {
-    const { messageId } = await params;
-    const body = await request.json();
-    const { content, isPinned } = body;
+    const { projectId, messageId } = await params;
+    const { message, error } = await getMessageOrError(messageId, projectId);
+    if (error) return error;
 
-    const updateData: Record<string, unknown> = {};
-    if (content !== undefined) updateData.content = content;
-    if (isPinned !== undefined) updateData.isPinned = isPinned;
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch (err) {
+      return handleJsonError(err);
+    }
 
-    const message = await prisma.message.update({
+    const data: Record<string, unknown> = {};
+
+    if (body.content !== undefined) {
+      const content = sanitizeString(body.content, LIMITS.MESSAGE_CONTENT.max, LIMITS.MESSAGE_CONTENT.min);
+      if (content === null) return badRequest("消息内容不能为空");
+      data.content = content;
+    }
+
+    if (body.isPinned !== undefined) {
+      data.isPinned = sanitizeBoolean(body.isPinned, false);
+    }
+
+    if (Object.keys(data).length === 0) {
+      return badRequest("没有要更新的字段");
+    }
+
+    const updated = await prisma.message.update({
       where: { id: messageId },
-      data: updateData,
+      data,
     });
 
-    return NextResponse.json({ success: true, data: message });
+    return NextResponse.json({ success: true, data: updated });
   } catch (error) {
-    console.error("更新消息失败:", error);
-    return NextResponse.json(
-      { success: false, error: "更新消息失败" },
-      { status: 500 }
-    );
+    return serverError("更新消息失败", error, "MessageAPI");
   }
 }
 
@@ -39,18 +68,27 @@ export async function DELETE(
   { params }: { params: Promise<{ projectId: string; messageId: string }> }
 ) {
   try {
-    const { messageId } = await params;
+    const { projectId, messageId } = await params;
 
-    await prisma.message.deleteMany({
+    // 验证消息属于项目（但允许幂等删除）
+    const message = await prisma.message.findUnique({
       where: { id: messageId },
     });
 
+    // 消息不存在也返回成功（幂等）
+    if (!message) {
+      return NextResponse.json({ success: true });
+    }
+
+    // 消息不属于该项目
+    if (message.projectId !== projectId) {
+      return notFound("消息不存在");
+    }
+
+    await prisma.message.delete({ where: { id: messageId } });
+
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("删除消息失败:", error);
-    return NextResponse.json(
-      { success: false, error: "删除消息失败" },
-      { status: 500 }
-    );
+    return serverError("删除消息失败", error, "MessageAPI");
   }
 }

@@ -3,6 +3,13 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { badRequest, notFound, serverError, handleJsonError } from "@/lib/api/errors";
+import {
+  sanitizeString,
+  sanitizeJsonArray,
+  isValidLoreCategory,
+  LIMITS,
+} from "@/lib/api/validation";
 
 /** GET - 获取知识库词条列表 */
 export async function GET(
@@ -15,7 +22,9 @@ export async function GET(
     const category = searchParams.get("category");
 
     const where: Record<string, string> = { projectId };
-    if (category) where.category = category;
+    if (category && isValidLoreCategory(category)) {
+      where.category = category;
+    }
 
     const entries = await prisma.loreEntry.findMany({
       where,
@@ -24,11 +33,7 @@ export async function GET(
 
     return NextResponse.json({ success: true, data: entries });
   } catch (error) {
-    console.error("获取知识库列表失败:", error);
-    return NextResponse.json(
-      { success: false, error: "获取知识库列表失败" },
-      { status: 500 }
-    );
+    return serverError("获取知识库列表失败", error, "LoreAPI");
   }
 }
 
@@ -39,23 +44,39 @@ export async function POST(
 ) {
   try {
     const { projectId } = await params;
-    const body = await request.json();
-    const { title, content, keywords, category } = body;
 
-    if (!title || !title.trim()) {
-      return NextResponse.json(
-        { success: false, error: "词条标题不能为空" },
-        { status: 400 }
-      );
+    // 验证项目存在
+    const project = await prisma.project.findUnique({ where: { id: projectId } });
+    if (!project) {
+      return notFound("项目不存在");
     }
+
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch (error) {
+      return handleJsonError(error);
+    }
+
+    const title = sanitizeString(body.title, LIMITS.LORE_TITLE.max, LIMITS.LORE_TITLE.min);
+    if (title === null) {
+      return badRequest("词条标题不能为空，且不能超过 " + LIMITS.LORE_TITLE.max + " 字符");
+    }
+
+    const content = sanitizeString(body.content ?? "", LIMITS.LORE_CONTENT.max) ?? "";
+    const category = isValidLoreCategory(body.category) ? body.category : "general";
+
+    const keywords = Array.isArray(body.keywords)
+      ? sanitizeJsonArray(body.keywords, LIMITS.LORE_KEYWORDS.maxArrayLength, LIMITS.LORE_KEYWORDS.maxItemLength)
+      : null;
 
     const entry = await prisma.loreEntry.create({
       data: {
         projectId,
-        title: title.trim(),
-        content: content || "",
+        title,
+        content,
         keywords: JSON.stringify(keywords || []),
-        category: category || "general",
+        category,
       },
     });
 
@@ -64,10 +85,6 @@ export async function POST(
       { status: 201 }
     );
   } catch (error) {
-    console.error("创建词条失败:", error);
-    return NextResponse.json(
-      { success: false, error: "创建词条失败" },
-      { status: 500 }
-    );
+    return serverError("创建词条失败", error, "LoreAPI");
   }
 }

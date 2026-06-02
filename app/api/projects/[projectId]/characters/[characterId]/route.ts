@@ -3,6 +3,20 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { badRequest, notFound, serverError, handleJsonError } from "@/lib/api/errors";
+import { sanitizeString, sanitizeJsonArray, LIMITS } from "@/lib/api/validation";
+
+/**
+ * 验证角色是否属于指定项目
+ */
+async function getCharacterOrError(characterId: string, projectId: string) {
+  const character = await prisma.character.findUnique({
+    where: { id: characterId },
+  });
+  if (!character) return { error: notFound("角色不存在") };
+  if (character.projectId !== projectId) return { error: notFound("角色不存在") };
+  return { character };
+}
 
 /** GET - 获取角色详情 */
 export async function GET(
@@ -10,26 +24,13 @@ export async function GET(
   { params }: { params: Promise<{ projectId: string; characterId: string }> }
 ) {
   try {
-    const { characterId } = await params;
-
-    const character = await prisma.character.findUnique({
-      where: { id: characterId },
-    });
-
-    if (!character) {
-      return NextResponse.json(
-        { success: false, error: "角色不存在" },
-        { status: 404 }
-      );
-    }
+    const { projectId, characterId } = await params;
+    const { character, error } = await getCharacterOrError(characterId, projectId);
+    if (error) return error;
 
     return NextResponse.json({ success: true, data: character });
   } catch (error) {
-    console.error("获取角色详情失败:", error);
-    return NextResponse.json(
-      { success: false, error: "获取角色详情失败" },
-      { status: 500 }
-    );
+    return serverError("获取角色详情失败", error, "CharacterAPI");
   }
 }
 
@@ -39,31 +40,54 @@ export async function PUT(
   { params }: { params: Promise<{ projectId: string; characterId: string }> }
 ) {
   try {
-    const { characterId } = await params;
-    const body = await request.json();
-    const { name, age, appearance, personality, backstory, hiddenLore, persona, tags } = body;
+    const { projectId, characterId } = await params;
+    const { character, error } = await getCharacterOrError(characterId, projectId);
+    if (error) return error;
 
-    const character = await prisma.character.update({
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch (err) {
+      return handleJsonError(err);
+    }
+
+    const data: Record<string, unknown> = {};
+
+    if (body.name !== undefined) {
+      const name = sanitizeString(body.name, LIMITS.CHARACTER_NAME.max, LIMITS.CHARACTER_NAME.min);
+      if (name === null) return badRequest("角色名称不能为空");
+      data.name = name;
+    }
+
+    const stringFields = ["age", "appearance", "personality", "backstory", "hiddenLore", "persona"] as const;
+    for (const field of stringFields) {
+      if (body[field] !== undefined) {
+        data[field] = sanitizeString(body[field] ?? "", LIMITS.CHARACTER_FIELD.max) ?? "";
+      }
+    }
+
+    if (body.tags !== undefined) {
+      if (Array.isArray(body.tags)) {
+        const tags = sanitizeJsonArray(body.tags, LIMITS.CHARACTER_TAGS.maxArrayLength, LIMITS.CHARACTER_TAGS.maxItemLength);
+        if (tags === null) return badRequest("标签格式无效");
+        data.tags = JSON.stringify(tags);
+      } else {
+        return badRequest("标签必须是数组");
+      }
+    }
+
+    if (Object.keys(data).length === 0) {
+      return badRequest("没有要更新的字段");
+    }
+
+    const updated = await prisma.character.update({
       where: { id: characterId },
-      data: {
-        ...(name !== undefined && { name: name.trim() }),
-        ...(age !== undefined && { age }),
-        ...(appearance !== undefined && { appearance }),
-        ...(personality !== undefined && { personality }),
-        ...(backstory !== undefined && { backstory }),
-        ...(hiddenLore !== undefined && { hiddenLore }),
-        ...(persona !== undefined && { persona }),
-        ...(tags !== undefined && { tags: JSON.stringify(tags) }),
-      },
+      data,
     });
 
-    return NextResponse.json({ success: true, data: character });
+    return NextResponse.json({ success: true, data: updated });
   } catch (error) {
-    console.error("更新角色失败:", error);
-    return NextResponse.json(
-      { success: false, error: "更新角色失败" },
-      { status: 500 }
-    );
+    return serverError("更新角色失败", error, "CharacterAPI");
   }
 }
 
@@ -73,18 +97,14 @@ export async function DELETE(
   { params }: { params: Promise<{ projectId: string; characterId: string }> }
 ) {
   try {
-    const { characterId } = await params;
+    const { projectId, characterId } = await params;
+    const { error } = await getCharacterOrError(characterId, projectId);
+    if (error) return error;
 
-    await prisma.character.delete({
-      where: { id: characterId },
-    });
+    await prisma.character.delete({ where: { id: characterId } });
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("删除角色失败:", error);
-    return NextResponse.json(
-      { success: false, error: "删除角色失败" },
-      { status: 500 }
-    );
+    return serverError("删除角色失败", error, "CharacterAPI");
   }
 }

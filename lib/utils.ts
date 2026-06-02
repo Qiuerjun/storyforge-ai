@@ -41,9 +41,10 @@ export function formatRelativeTime(date: Date | string): string {
 
 /**
  * 生成随机 ID（用于临时标识）
+ * 注意：不适用于安全场景，仅用于前端临时标识
  */
 export function generateId(): string {
-  return Math.random().toString(36).substring(2, 11);
+  return crypto.randomUUID().replace(/-/g, "").slice(0, 9);
 }
 
 /**

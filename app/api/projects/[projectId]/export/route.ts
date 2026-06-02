@@ -3,10 +3,11 @@
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { notFound, serverError } from "@/lib/api/errors";
 
 /** GET /api/projects/[projectId]/export - 导出项目数据 */
 export async function GET(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   try {
@@ -18,10 +19,7 @@ export async function GET(
     });
 
     if (!project) {
-      return new Response(
-        JSON.stringify({ error: "项目不存在" }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
-      );
+      return notFound("项目不存在");
     }
 
     // 并行查询所有关联数据
@@ -49,7 +47,7 @@ export async function GET(
         }),
       ]);
 
-    // 组装导出数据
+    // 组装导出数据（不包含内部 ID、不泄露敏感信息）
     const exportData = {
       version: "1.0",
       exportedAt: new Date().toISOString(),
@@ -84,7 +82,6 @@ export async function GET(
         role: m.role,
         content: m.content,
         isPinned: m.isPinned,
-        metadata: m.metadata,
         createdAt: m.createdAt.toISOString(),
       })),
       worldStates: worldStates.map((w) => ({
@@ -95,19 +92,16 @@ export async function GET(
     };
 
     // 返回 JSON 文件下载
-    const fileName = `${project.name.replace(/[<>:"/\\|?*]/g, "_")}_${new Date().toISOString().slice(0, 10)}.json`;
+    const safeName = project.name.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").slice(0, 100);
+    const fileName = `${safeName}_${new Date().toISOString().slice(0, 10)}.json`;
 
     return new Response(JSON.stringify(exportData, null, 2), {
       headers: {
         "Content-Type": "application/json; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${encodeURIComponent(fileName)}"`,
+        "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
       },
     });
   } catch (error) {
-    console.error("导出项目失败:", error);
-    return new Response(
-      JSON.stringify({ error: "导出项目失败" }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
+    return serverError("导出项目失败", error, "ExportAPI");
   }
 }
