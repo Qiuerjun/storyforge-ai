@@ -64,12 +64,21 @@ export async function retrieveRelevantMemories(
     .sort((a, b) => b.score - a.score)
     .slice(0, maxResults);
 
-  return scored.map((item) => ({
-    ...item.memory,
-    tags: JSON.parse(item.memory.tags || "[]"),
-    createdAt: item.memory.createdAt.toISOString(),
-    updatedAt: item.memory.updatedAt.toISOString(),
-  }));
+  return scored.map((item) => {
+    // 防御性解析：评分阶段已有 try-catch，但此处是最终映射，必须独立保护
+    let tags: string[] = [];
+    try {
+      tags = JSON.parse(item.memory.tags || "[]");
+    } catch {
+      // tags JSON 损坏时降级为空数组，不影响记忆内容返回
+    }
+    return {
+      ...item.memory,
+      tags,
+      createdAt: item.memory.createdAt.toISOString(),
+      updatedAt: item.memory.updatedAt.toISOString(),
+    };
+  });
 }
 
 /**
@@ -85,12 +94,21 @@ export async function getRecentMemories(
     take: limit,
   });
 
-  return memories.map((m) => ({
-    ...m,
-    tags: JSON.parse(m.tags || "[]"),
-    createdAt: m.createdAt.toISOString(),
-    updatedAt: m.updatedAt.toISOString(),
-  }));
+  return memories.map((m) => {
+    // 防御性解析：与 retrieveRelevantMemories 保持一致，tags JSON 损坏时降级为空数组
+    let tags: string[] = [];
+    try {
+      tags = JSON.parse(m.tags || "[]");
+    } catch {
+      // tags JSON 损坏时不阻断记忆返回
+    }
+    return {
+      ...m,
+      tags,
+      createdAt: m.createdAt.toISOString(),
+      updatedAt: m.updatedAt.toISOString(),
+    };
+  });
 }
 
 /**

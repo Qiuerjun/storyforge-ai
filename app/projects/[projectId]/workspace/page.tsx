@@ -30,6 +30,22 @@ import { toast } from "@/hooks/use-toast";
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 
+/** 世界状态提取标记 */
+// 不使用 $ 锚定：AI 可能在标记块后附加文字（如结尾语），锚定会导致两个正则都不匹配
+const WS_MARKER_RE = /\s*<<WORLD_STATE_START>>[\s\S]*?<<WORLD_STATE_END>>\s*/;
+// 流式输出中未闭合的标记（正在输出世界状态时，END 标记尚未出现）
+const WS_MARKER_PARTIAL_RE = /\s*<<WORLD_STATE_START>>(?![\s\S]*<<WORLD_STATE_END>>)[\s\S]*$/;
+
+/** 剥离 AI 输出中的世界状态标记，返回用户可见的干净文本 */
+function stripWorldStateMarkers(text: string): string {
+  if (!text) return text;
+  // 先移除完整的标记块
+  let cleaned = text.replace(WS_MARKER_RE, "");
+  // 再移除流式输出中未闭合的标记（正在输出世界状态时）
+  cleaned = cleaned.replace(WS_MARKER_PARTIAL_RE, "");
+  return cleaned.trimEnd();
+}
+
 /** 消息类型 */
 interface Message {
   id: string;
@@ -86,7 +102,11 @@ export default function WorkspacePage() {
       const res = await fetch(`/api/projects/${projectId}/messages?limit=100`);
       const data = await res.json();
       if (data.success) {
-        setMessages(data.data.items);
+        // 清理旧数据中可能残留的世界状态标记
+        const cleaned = (data.data.items as Message[]).map((m) =>
+          m.role === "assistant" ? { ...m, content: stripWorldStateMarkers(m.content) } : m
+        );
+        setMessages(cleaned);
       }
     } catch (err) {
       console.error("加载消息失败:", err);
@@ -170,6 +190,7 @@ export default function WorkspacePage() {
     const observer = new MutationObserver(() => {
       if (hasCursorRef.current) {
         hasCursorRef.current = false;
+        return; // 光标刚被注入，跳过本次回调避免无限循环
       }
       injectCursor();
     });
@@ -264,6 +285,21 @@ export default function WorkspacePage() {
     }
   };
 
+  /** 保存消息到数据库（剥离世界状态标记），静默失败不阻塞调用方 */
+  const saveMessage = async (role: "user" | "assistant", rawContent: string) => {
+    const content = role === "assistant" ? stripWorldStateMarkers(rawContent) : rawContent;
+    if (!content) return;
+    try {
+      await fetch(`/api/projects/${projectId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role, content }),
+      });
+    } catch (err) {
+      console.error(`保存${role === "user" ? "用户" : "AI"}消息失败:`, err);
+    }
+  };
+
   /** 发送消息 */
   const handleSend = async () => {
     const content = input.trim();
@@ -282,15 +318,7 @@ export default function WorkspacePage() {
     setMessages((prev) => [...prev, userMsg]);
 
     // 保存用户消息到数据库
-    try {
-      await fetch(`/api/projects/${projectId}/messages`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: "user", content }),
-      });
-    } catch (err) {
-      console.error("保存用户消息失败:", err);
-    }
+    await saveMessage("user", content);
 
     // 创建 AI 回复占位
     const aiMsgId = `ai-${Date.now()}`;
@@ -335,29 +363,39 @@ export default function WorkspacePage() {
       let fullContent = "";
 
       if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-          const chunk = decoder.decode(value, { stream: true });
-          fullContent += chunk;
+            const chunk = decoder.decode(value, { stream: true });
+            fullContent += chunk;
+            // 剥离标记后存入 state，避免标记泄露到编辑框、置顶面板和下次对话上下文
+            const cleanChunk = stripWorldStateMarkers(fullContent);
+            setMessages((prev) => {
+              if (!prev.some((m) => m.id === aiMsgId)) return prev;
+              return prev.map((m) =>
+                m.id === aiMsgId ? { ...m, content: cleanChunk } : m
+              );
+            });
+          }
+        } finally {
+          // 刷新 TextDecoder 缓冲的尾部多字节字节，无论正常结束还是中止都执行
+          fullContent += decoder.decode();
+          // 最终更新 state（含 decoder.flush 的尾部字节）
+          const cleanContent = stripWorldStateMarkers(fullContent);
           setMessages((prev) => {
-            // 检查消息是否仍存在（可能已被删除）
             if (!prev.some((m) => m.id === aiMsgId)) return prev;
             return prev.map((m) =>
-              m.id === aiMsgId ? { ...m, content: fullContent } : m
+              m.id === aiMsgId ? { ...m, content: cleanContent } : m
             );
           });
         }
       }
 
-      // 保存到数据库
+      // 保存到数据库（fullContent 含原始标记，saveMessage 内部会剥离）
       if (fullContent) {
-        await fetch(`/api/projects/${projectId}/messages`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ role: "assistant", content: fullContent }),
-        });
+        await saveMessage("assistant", fullContent);
       }
     } catch (err: unknown) {
       if (err instanceof Error && err.name === "AbortError") {
@@ -365,7 +403,7 @@ export default function WorkspacePage() {
         if (isDeletingRef.current) {
           isDeletingRef.current = false;
         } else {
-          // 用户手动停止生成，保存已生成的内容
+          // 用户手动停止生成，保存已生成的内容（state 中已是干净文本）
           let savedContent = "";
           setMessages((prev) => {
             const msg = prev.find((m) => m.id === aiMsgId);
@@ -373,11 +411,7 @@ export default function WorkspacePage() {
             return prev;
           });
           if (savedContent) {
-            await fetch(`/api/projects/${projectId}/messages`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ role: "assistant", content: savedContent }),
-            });
+            await saveMessage("assistant", savedContent);
           }
         }
       } else {
@@ -394,6 +428,8 @@ export default function WorkspacePage() {
       abortControllerRef.current = null;
       streamingMsgIdRef.current = null;
       isDeletingRef.current = false;
+      // 延迟刷新世界状态面板（等待后端异步提取完成）
+      setTimeout(() => loadWorldStates(), 2000);
     }
   };
 

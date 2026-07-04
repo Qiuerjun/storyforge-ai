@@ -5,7 +5,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateText } from "ai";
 import { prisma } from "@/lib/prisma";
-import { badRequest, notFound, serverError, handleJsonError } from "@/lib/api/errors";
+import {
+  badRequest,
+  notFound,
+  serverError,
+  handleJsonError,
+} from "@/lib/api/errors";
 import { validateExternalUrl } from "@/lib/api/url-security";
 import { sanitizeModelConfig, sanitizeImportance } from "@/lib/api/validation";
 
@@ -85,51 +90,49 @@ export async function POST(
 
     // 构建对话文本（限制总长度）
     const conversationText = messages
-      .map((m) => `[${m.role === "user" ? "用户" : "AI"}] ${m.content.slice(0, 500)}`)
+      .map(
+        (m) =>
+          `[${m.role === "user" ? "用户" : "AI"}] ${m.content.slice(0, 500)}`
+      )
       .join("\n");
 
+    // 使用更简洁明确的 prompt，适配本地模型
     const { text } = await generateText({
       model: openai.chat(modelName),
-      prompt: `请从以下对话或故事内容中提取关键信息，作为故事记忆保存。
+      prompt: `分析下面的对话，提取关键事实。每条事实一行，格式：
+[重要性1-10] [标签1,标签2] 事实内容
 
-需要提取的内容包括：
-1. 角色的重要行为、决定或状态变化
-2. 故事中的关键事件和转折点
-3. 地点、物品、关系的变化
-4. 重要的设定或背景信息
-5. 角色之间的互动和关系发展
+只提取有信息量的事实，比如：
+- 角色做了什么决定或行动
+- 发生了什么重要事件
+- 获得或失去了什么物品
+- 关系发生了什么变化
+- 到达了什么新地点
 
-要求：
-1. 每条记忆应该是独立的、可理解的事实陈述
-2. 每条记忆不超过 50 字
-3. 如果内容中有值得记录的信息，请务必提取
-4. 只有在完全没有有意义的内容时才返回空数组
+如果没有什么值得记录的事实，只输出：无
 
-请以 JSON 数组格式返回，每个元素包含：
-- content: 记忆内容（字符串）
-- tags: 相关标签（字符串数组）
-- importance: 重要性 1-10（数字）
-
-对话/故事内容：
+对话内容：
 ${conversationText}
 
-请直接返回 JSON 数组，不要有其他文字：`,
-      temperature: 0.3,
-      maxOutputTokens: 1000,
+请逐行列出事实：`,
+      temperature: 0.2,
+      maxOutputTokens: 800,
     });
 
-    // 解析 AI 返回的记忆
+    // 解析 AI 返回的记忆 — 支持多种格式
     let extractedMemories: Array<{
       content: string;
       tags: string[];
       importance: number;
     }> = [];
 
+    // 策略1: 尝试解析 JSON 数组
     try {
+      // 贪婪匹配：确保捕获完整 JSON 数组（含嵌套数组），非贪婪会在内层 ] 处截断
       const jsonMatch = text.match(/\[[\s\S]*\]/);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
-        if (Array.isArray(parsed)) {
+        if (Array.isArray(parsed) && parsed.length > 0) {
           extractedMemories = parsed
             .filter((m: unknown) => {
               if (!m || typeof m !== "object") return false;
@@ -141,35 +144,94 @@ ${conversationText}
               return {
                 content: String(mem.content).slice(0, 200),
                 tags: Array.isArray(mem.tags)
-                  ? mem.tags.filter((t: unknown) => typeof t === "string").slice(0, 10)
+                  ? mem.tags
+                      .filter((t: unknown) => typeof t === "string")
+                      .slice(0, 10)
                   : [],
                 importance: sanitizeImportance(mem.importance),
               };
             })
-            .slice(0, 20); // 最多 20 条
+            .slice(0, 20);
         }
       }
     } catch {
-      // 如果 AI 没有返回标准 JSON，尝试简单提取
-      const lines = text.split("\n").filter((l) => l.trim() && !l.startsWith("[") && !l.startsWith("]"));
-      extractedMemories = lines.slice(0, 5).map((line) => ({
-        content: line.replace(/^[-*•]\s*/, "").replace(/^[0-9]+[.、]\s*/, "").trim().slice(0, 200),
-        tags: [],
-        importance: 5,
-      })).filter(m => m.content.length > 5);
+      // JSON 解析失败，继续尝试其他格式
+    }
+
+    // 策略2: 解析 "[importance] [tag1,tag2] content" 格式
+    if (extractedMemories.length === 0) {
+      const lines = text.split("\n").filter((l) => {
+        const t = l.trim();
+        // 仅过滤 AI 的精确回复"无"，不误杀以"无"开头的合法中文句子
+        return t.length > 5 && t !== "无";
+      });
+
+      for (const line of lines) {
+        const trimmed = line.replace(/^[-*•]\s*/, "").replace(/^\d+[.、)\]]\s*/, "").trim();
+        if (trimmed.length < 5) continue;
+
+        // 尝试匹配 [importance] [tags] content
+        const bracketMatch = trimmed.match(
+          /^\[(\d{1,2})\]\s*\[([^\]]*)\]\s*(.+)/
+        );
+        if (bracketMatch) {
+          const importance = Math.min(
+            10,
+            Math.max(1, parseInt(bracketMatch[1]) || 5)
+          );
+          const tags = bracketMatch[2]
+            .split(/[,，、]/)
+            .map((t) => t.trim())
+            .filter((t) => t.length > 0)
+            .slice(0, 10);
+          const content = bracketMatch[3].trim().slice(0, 200);
+          if (content.length > 3) {
+            extractedMemories.push({ content, tags, importance });
+          }
+          continue;
+        }
+
+        // 没有格式标记的普通文本行
+        if (trimmed.length > 5 && trimmed.length < 200) {
+          extractedMemories.push({
+            content: trimmed.slice(0, 200),
+            tags: [],
+            importance: 5,
+          });
+        }
+      }
+    }
+
+    // 策略3: 如果还是没有结果，用最后一道防线 — 按句号分割
+    if (extractedMemories.length === 0) {
+      const sentences = text
+        .split(/[。！？\n]/)
+        .map((s) => s.replace(/^[-*•]\s*/, "").trim())
+        .filter((s) => s.length > 8 && s.length < 200 && s !== "无");
+
+      for (const s of sentences.slice(0, 5)) {
+        extractedMemories.push({
+          content: s.slice(0, 200),
+          tags: [],
+          importance: 5,
+        });
+      }
     }
 
     // 保存到数据库
     const savedMemories = [];
     for (const mem of extractedMemories) {
-      if (mem.content && mem.content.length > 5) {
+      if (mem.content && mem.content.length > 3) {
         const saved = await prisma.memory.create({
           data: {
             projectId,
             content: mem.content,
             tags: JSON.stringify(mem.tags || []),
             importance: mem.importance,
-            sourceMessageId: messages[messages.length - 1]?.id || null,
+            // 不标记 sourceMessageId：批量提取的记忆涵盖多条消息，
+            // 无法准确归属到单条消息。标记为 null 避免删除某条消息时
+            // 误删/漏删批量提取的记忆。
+            sourceMessageId: null,
           },
         });
         savedMemories.push(saved);
@@ -182,6 +244,10 @@ ${conversationText}
       message: `提取了 ${savedMemories.length} 条记忆`,
     });
   } catch (error) {
-    return serverError("记忆提取失败，请检查模型配置", error, "MemoryExtractAPI");
+    return serverError(
+      "记忆提取失败，请检查模型配置",
+      error,
+      "MemoryExtractAPI"
+    );
   }
 }

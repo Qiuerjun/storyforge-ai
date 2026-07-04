@@ -62,7 +62,7 @@ export async function PUT(
   }
 }
 
-/** DELETE - 删除消息（幂等：记录不存在也返回成功） */
+/** DELETE - 删除消息及其关联记忆（幂等：记录不存在也返回成功） */
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ projectId: string; messageId: string }> }
@@ -85,7 +85,15 @@ export async function DELETE(
       return notFound("消息不存在");
     }
 
-    await prisma.message.delete({ where: { id: messageId } });
+    // 删除消息并清理关联记忆
+    await prisma.$transaction([
+      // 先删除以该消息为来源的记忆
+      prisma.memory.deleteMany({
+        where: { sourceMessageId: messageId, projectId },
+      }),
+      // 再删除消息本身
+      prisma.message.delete({ where: { id: messageId } }),
+    ]);
 
     return NextResponse.json({ success: true });
   } catch (error) {

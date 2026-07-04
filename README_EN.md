@@ -27,7 +27,8 @@ StoryForge AI is an AI-assisted creation environment designed for novelists and 
 
 ### 📝 Creation Workspace
 - Chat-like interaction interface with streaming output and typewriter effect
-- Automatically injects project settings, character information, and world state as context
+- Automatically injects project settings, character information, world state, and relevant memories as context
+- AI automatically tracks and updates world state variables (main plot progress, key items, relationship changes, etc.)
 - Supports pinning important information for long-term memory use
 - Quick command system (`/describe`, `/roll`, `/npc`)
 
@@ -43,9 +44,11 @@ StoryForge AI is an AI-assisted creation environment designed for novelists and 
 
 ### 🧠 Memory Index
 - AI automatically extracts key facts and important events from conversations
+- Automatically retrieves relevant memories into conversation context during chat for story coherence
 - Support for manual addition and editing of memories
 - Graded by importance, managed with tag classification
 - Keyword-based relevance retrieval
+- Cascade cleanup of associated memories when messages are deleted
 
 ### ⚙️ Flexible Configuration
 - Support for multiple AI model backends (OpenAI, Ollama, vLLM, etc.)
@@ -224,6 +227,13 @@ storyforge-ai/
 | tags | String | Tags (JSON Array) |
 | importance | Int | Importance 1-10 |
 | sourceMessageId | String | Source Message ID |
+
+### WorldState
+| Field | Type | Description |
+|-------|------|-------------|
+| key | String | State Key (e.g. "Main Progress", "Gold") |
+| value | String | State Value |
+| description | String | Description |
 
 ### Message
 | Field | Type | Description |
@@ -508,6 +518,20 @@ Contributions are welcome! Please follow these steps:
 ---
 
 ## 📝 Changelog
+
+### v0.4.0 (2026-06-02)
+
+- ✨ World State Auto-Extraction: AI automatically tracks and updates world state variables during conversation (main plot progress, key items, relationship changes, etc.)
+- ✨ Memory Injection into Chat Context: Automatically retrieves relevant memories during conversation to maintain story coherence
+- ✨ Memory Extraction Robustness: Rewritten extraction prompt with three-tier parsing strategy, better local model compatibility
+- 🐛 Message Deletion Cascade Cleanup: Deleting messages now automatically cleans up associated memories
+- 🐛 World State Markers Hidden from Users: Internal extraction markers are stripped from UI and storage
+- 🐛 Fix streaming cursor injection infinite loop (MutationObserver self-trigger)
+- 🐛 Fix multi-byte character (CJK) truncation at end of streaming output
+- 🐛 Fix world state markers leaking into edit box, pinned messages, and conversation context
+- 🐛 Fix edge cases in memory extraction JSON parsing and Chinese text filtering
+- 🐎 Parallelize chat API database queries to reduce response latency
+- 🐎 Parallelize world state writes to improve extraction performance
 
 ### v0.3.0 (2026-06-02)
 
